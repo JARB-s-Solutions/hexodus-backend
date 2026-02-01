@@ -1,13 +1,17 @@
 {
   "name": "hexodus-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend server para la aplicación web Gym Hexodus.",
+  "main": "src/server.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "postinstall": "prisma generate"
   },
   "keywords": [],
-  "author": "",
+  "author": "JarbsSolutions",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.6",
