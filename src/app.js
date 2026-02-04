@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import routes from './routes/index.js';
+import router from './routes/index.js';
+import sociosRoutes from './routes/sociosRoutes.js';
 
 // Initializar Express app
 
@@ -19,6 +22,10 @@ app.use(express.urlencoded({ extended: true }));
 
 // Habilitar CORS
 app.use(cors());
+
+app.use('/api', routes);
+
+router.use('/socios', sociosRoutes);
 
 // RUTA DE PRUEBA
 app.get("/", (req, res) => {
