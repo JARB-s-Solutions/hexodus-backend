@@ -1,0 +1,71 @@
+// 1. Configuración del generador y la fuente de datos
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// 2. Definición del Enum para el status de Usuario
+enum UsuarioStatus {
+  activo
+  inactivo
+}
+
+// 3. Modelo: Usuarios
+model Usuario {
+  id            Int           @id @default(autoincrement()) @map("usuario_id")
+  uid           String        @unique @db.VarChar(60) // Probablemente linkeado a Supabase Auth
+  username      String        @unique @db.VarChar(60)
+  nombreCompleto String       @map("nombre_completo") @db.VarChar(120)
+  email         String        @unique @db.VarChar(160)
+  telefono      String?       @db.VarChar(20)
+  status        UsuarioStatus @default(activo)
+  password      String        @db.VarChar(255)
+  ultimoAcceso  DateTime?     @map("ultimo_acceso")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime?     @updatedAt @map("updated_at")
+  
+  // Clave foránea y Relación
+  rolId         Int           @map("rol_id")
+  rol           Rol           @relation(fields: [rolId], references: [id])
+
+  // Nombre real de la tabla en la BD
+  @@map("usuarios")
+}
+
+// 4. Modelo: Roles
+model Rol {
+  id          Int      @id @default(autoincrement()) @map("rol_id")
+  nombre      String   @unique @db.VarChar(60)
+  descripcion String?  @db.VarChar(255)
+  status      String   @default("activo") // Pediste String, no Enum aquí
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relaciones inversas
+  usuarios    Usuario[]
+  permisos    RolModuloPermiso[]
+
+  @@map("roles")
+}
+
+// 5. Modelo: Permisos (Rol-Módulo)
+model RolModuloPermiso {
+  id        Int     @id @default(autoincrement()) @map("permiso_id")
+  rolId     Int     @map("rol_id")
+  modulo    String  @db.VarChar(80)
+  canView   Boolean @default(true) @map("can_view")
+  canCreate Boolean @default(false) @map("can_create")
+  canEdit   Boolean @default(false) @map("can_edit")
+  canDelete Boolean @default(false) @map("can_delete")
+
+  // Relación con Rol (On Delete Cascade)
+  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+
+  // Restricción Única compuesta
+  @@unique([rolId, modulo])
+  @@map("rol_modulo_permisos")
+} 
