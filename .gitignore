@@ -143,3 +143,6 @@ vite.config.ts.timestamp-*
 
 # MD
 PROMPTS_UI_DESIGN.md
+
+# SCRIPTS
+scripts
