@@ -33,6 +33,9 @@ model Usuario {
   rolId         Int           @map("rol_id")
   rol           Rol           @relation(fields: [rolId], references: [id])
 
+  passwordResetToken   String?   @db.VarChar(255) // El token que enviamos al correo
+  passwordResetExpires DateTime?                  // Cuándo caduca ese token
+
   // Nombre real de la tabla en la BD
   @@map("usuarios")
 }
