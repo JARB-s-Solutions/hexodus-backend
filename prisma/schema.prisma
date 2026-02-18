@@ -1,4 +1,3 @@
-// 1. Configuración del generador y la fuente de datos
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,53 +8,146 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// 2. Definición del Enum para el status de Usuario
-enum UsuarioStatus {
+// ==========================================================
+// 📌 ENUMS (Listas de valores permitidos)
+// ==========================================================
+
+enum EstadoGeneral {
   activo
   inactivo
 }
 
-// 3. Modelo: Usuarios
+enum ContratoStatus {
+  vigente
+  vencido
+  cancelado
+}
+
+enum MembresiaSocioStatus {
+  activa
+  vencida
+  cancelada
+}
+
+enum EstadoPago {
+  sin_pagar
+  pagado
+}
+
+enum MovimientoInvTipo {
+  IN
+  OUT
+  AJUSTE
+}
+
+enum ReferenciaInvTipo {
+  compra
+  venta
+  ajuste
+  otro
+}
+
+enum CompraStatus {
+  registrada
+  cancelada
+}
+
+enum VentaStatus {
+  exitosa
+  cancelada
+  pendiente
+}
+
+enum BackupTipo {
+  full
+  incremental
+  manual
+}
+
+enum ProcesoStatus {
+  exitoso
+  fallido
+}
+
+enum CorteCajaStatus {
+  abierto
+  cerrado
+}
+
+enum AccesoTipo {
+  IN
+  OUT
+}
+
+enum ConceptoTipo {
+  ingreso
+  gasto
+}
+
+enum CajaRefTipo {
+  venta
+  membresia
+  otro
+}
+
+// ==========================================================
+// 1 y 2. MÓDULO: USUARIOS Y ROLES
+// ==========================================================
+
 model Usuario {
-  id            Int           @id @default(autoincrement()) @map("usuario_id")
-  uid           String        @unique @db.VarChar(60) // Probablemente linkeado a Supabase Auth
-  username      String        @unique @db.VarChar(60)
-  nombreCompleto String       @map("nombre_completo") @db.VarChar(120)
-  email         String        @unique @db.VarChar(160)
-  telefono      String?       @db.VarChar(20)
-  status        UsuarioStatus @default(activo)
-  password      String        @db.VarChar(255)
-  ultimoAcceso  DateTime?     @map("ultimo_acceso")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime?     @updatedAt @map("updated_at")
+  id                   Int       @id @default(autoincrement()) @map("usuario_id")
+  uid                  String    @unique @db.VarChar(60)
+  username             String    @unique @db.VarChar(60)
+  nombreCompleto       String    @map("nombre_completo") @db.VarChar(120)
+  email                String    @unique @db.VarChar(160)
+  telefono             String?   @db.VarChar(20)
+  status               EstadoGeneral @default(activo)
+  password             String    @db.VarChar(255)
+  ultimoAcceso         DateTime? @map("ultimo_acceso")
   
-  // Clave foránea y Relación
-  rolId         Int           @map("rol_id")
-  rol           Rol           @relation(fields: [rolId], references: [id])
+  // Recuperación de Contraseña
+  passwordResetToken   String?   @map("password_reset_token") @db.VarChar(255)
+  passwordResetExpires DateTime? @map("password_reset_expires")
 
-  passwordResetToken   String?   @db.VarChar(255) // El token que enviamos al correo
-  passwordResetExpires DateTime?                  // Cuándo caduca ese token
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime? @updatedAt @map("updated_at")
+  rolId                Int       @map("rol_id")
+  rol                  Rol       @relation(fields: [rolId], references: [id])
 
-  // Nombre real de la tabla en la BD
+  // Relaciones Inversas (Todo lo que hace un usuario en el sistema)
+  sociosCreados        Socio[]              @relation("UsuarioSocio")
+  contratosCreados     SocioContrato[]      @relation("UsuarioContrato")
+  planesCreados        MembresiaPlan[]      @relation("UsuarioPlan")
+  membresiasAsignadas  MembresiaSocio[]     @relation("UsuarioAsignaMembresia")
+  pagosRecibidos       PagoMembresia[]      @relation("UsuarioRecibePago")
+  movimientosInventario InventarioMovimiento[] @relation("UsuarioInvMov")
+  comprasRealizadas    Compra[]             @relation("UsuarioCompra")
+  ventasRealizadas     Venta[]              @relation("UsuarioVenta")
+  logsAuditoria        AuditoriaLog[]       @relation("UsuarioAuditoria")
+  settingsActualizados Setting[]            @relation("UsuarioSetting")
+  backupsGenerados     BackupLog[]          @relation("UsuarioBackup")
+  restoresRealizados   RestoreLog[]         @relation("UsuarioRestore")
+  cortesCaja           CorteCaja[]          @relation("UsuarioCorte")
+  accesosValidados     Acceso[]             @relation("UsuarioAcceso")
+  eliminacionesLogs    EliminacionLog[]     @relation("UsuarioEliminacion")
+  movimientosCaja      CajaMovimiento[]     @relation("UsuarioCajaMov")
+
   @@map("usuarios")
 }
 
-// 4. Modelo: Roles
 model Rol {
   id          Int      @id @default(autoincrement()) @map("rol_id")
   nombre      String   @unique @db.VarChar(60)
   descripcion String?  @db.VarChar(255)
-  status      String   @default("activo") // Pediste String, no Enum aquí
+  status      String   @default("activo")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  // Relaciones inversas
   usuarios    Usuario[]
   permisos    RolModuloPermiso[]
 
   @@map("roles")
 }
 
-// 5. Modelo: Permisos (Rol-Módulo)
 model RolModuloPermiso {
   id        Int     @id @default(autoincrement()) @map("permiso_id")
   rolId     Int     @map("rol_id")
@@ -65,10 +157,520 @@ model RolModuloPermiso {
   canEdit   Boolean @default(false) @map("can_edit")
   canDelete Boolean @default(false) @map("can_delete")
 
-  // Relación con Rol (On Delete Cascade)
   rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
 
-  // Restricción Única compuesta
   @@unique([rolId, modulo])
   @@map("rol_modulo_permisos")
-} 
+}
+
+// ==========================================================
+// 3. MÓDULO: SOCIOS Y CONTRATOS
+// ==========================================================
+
+model Socio {
+  id              Int       @id @default(autoincrement()) @map("socio_id")
+  uuidSocio       String    @unique @map("uuid_socio") @db.VarChar(60)
+  codigoSocio     String    @unique @map("codigo_socio") @db.VarChar(30)
+  nombre          String    @db.VarChar(120)
+  apellidoPaterno String    @map("apellido_paterno") @db.VarChar(120)
+  apellidoMaterno String?   @map("apellido_materno") @db.VarChar(120)
+  correo          String?   @db.VarChar(160)
+  telefono        String?   @db.VarChar(20)
+  fotoUrl         String?   @map("foto_url") @db.VarChar(255)
+  status          EstadoGeneral @default(activo)
+  
+  // Soft Delete
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at")
+
+  createdBy       Int?      @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  creador         Usuario?  @relation("UsuarioSocio", fields: [createdBy], references: [id])
+  contratos       SocioContrato[]
+  membresias      MembresiaSocio[]
+  inscripciones   ClaseInscripcion[]
+  accesos         Acceso[]
+
+  @@index([status])
+  @@index([telefono])
+  @@map("socios")
+}
+
+model Contrato {
+  id             Int       @id @default(autoincrement()) @map("contrato_id")
+  nombre         String    @db.VarChar(120)
+  descripcion    String?   @db.VarChar(255)
+  duracionDias   Int       @map("duracion_dias")
+  status         EstadoGeneral @default(activo)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  socioContratos SocioContrato[]
+
+  @@map("contratos")
+}
+
+model SocioContrato {
+  id                 Int       @id @default(autoincrement()) @map("socio_contrato_id")
+  uuidSocioContrato  String    @unique @map("uuid_socio_contrato") @db.VarChar(60)
+  socioId            Int       @map("socio_id")
+  contratoId         Int?      @map("contrato_id")
+  fechaInicio        DateTime  @map("fecha_inicio")
+  fechaFin           DateTime  @map("fecha_fin")
+  status             ContratoStatus @default(vigente)
+  archivoUrl         String?   @map("archivo_url") @db.VarChar(255)
+  observaciones      String?   @db.VarChar(255)
+  createdBy          Int?      @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  socio              Socio     @relation(fields: [socioId], references: [id])
+  contrato           Contrato? @relation(fields: [contratoId], references: [id])
+  creador            Usuario?  @relation("UsuarioContrato", fields: [createdBy], references: [id])
+
+  @@index([socioId, fechaFin])
+  @@index([status])
+  @@map("socio_contratos")
+}
+
+// ==========================================================
+// 4. MÓDULO: MEMBRESÍAS Y PAGOS
+// ==========================================================
+
+model MembresiaPlan {
+  id             Int       @id @default(autoincrement()) @map("plan_id")
+  uuidPlan       String    @unique @map("uuid_plan") @db.VarChar(60)
+  nombre         String    @db.VarChar(120)
+  duracionDias   Int       @map("duracion_dias")
+  precioActual   Decimal   @map("precio_actual") @db.Decimal(10,2)
+  status         EstadoGeneral @default(activo)
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  creador        Usuario?  @relation("UsuarioPlan", fields: [createdBy], references: [id])
+  membresiasSocio MembresiaSocio[]
+
+  @@map("membresia_planes")
+}
+
+model MembresiaSocio {
+  id                 Int       @id @default(autoincrement()) @map("membresia_socio_id")
+  uuidMembresiaSocio String    @unique @map("uuid_membresia_socio") @db.VarChar(60)
+  socioId            Int       @map("socio_id")
+  planId             Int       @map("plan_id")
+  fechaInicio        DateTime  @map("fecha_inicio")
+  fechaFin           DateTime  @map("fecha_fin")
+  status             MembresiaSocioStatus
+  estadoPago         EstadoPago @default(sin_pagar) @map("estado_pago")
+  precioCongelado    Decimal?  @map("precio_congelado") @db.Decimal(10,2)
+  asignadoPor        Int?      @map("asignado_por")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  socio              Socio     @relation(fields: [socioId], references: [id])
+  plan               MembresiaPlan @relation(fields: [planId], references: [id])
+  usuarioAsigna      Usuario?  @relation("UsuarioAsignaMembresia", fields: [asignadoPor], references: [id])
+  pagos              PagoMembresia[]
+
+  @@index([socioId, fechaFin])
+  @@index([estadoPago])
+  @@map("membresia_socio")
+}
+
+model MetodoPago {
+  id             Int       @id @default(autoincrement()) @map("metodo_pago_id")
+  nombre         String    @unique @db.VarChar(40)
+
+  pagosMembresia PagoMembresia[]
+  ventaPagos     VentaPago[]
+
+  @@map("metodos_pago")
+}
+
+model PagoMembresia {
+  id                 Int       @id @default(autoincrement()) @map("pago_membresia_id")
+  membresiaSocioId   Int       @map("membresia_socio_id")
+  metodoPagoId       Int       @map("metodo_pago_id")
+  monto              Decimal   @db.Decimal(10,2)
+  referencia         String?   @db.VarChar(80)
+  pagadoEn           DateTime  @default(now()) @map("pagado_en")
+  recibidoPor        Int?      @map("recibido_por")
+
+  membresiaSocio     MembresiaSocio @relation(fields: [membresiaSocioId], references: [id])
+  metodoPago         MetodoPago     @relation(fields: [metodoPagoId], references: [id])
+  cobrador           Usuario?       @relation("UsuarioRecibePago", fields: [recibidoPor], references: [id])
+
+  @@index([pagadoEn])
+  @@map("pagos_membresia")
+}
+
+// ==========================================================
+// 5. MÓDULO: CLASES
+// ==========================================================
+
+model Clase {
+  id             Int       @id @default(autoincrement()) @map("clase_id")
+  nombre         String    @db.VarChar(120)
+  descripcion    String?   @db.VarChar(255)
+  cupo           Int?
+  status         EstadoGeneral @default(activo)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  horarios       ClaseHorario[]
+  inscripciones  ClaseInscripcion[]
+
+  @@map("clases")
+}
+
+model ClaseHorario {
+  id             Int       @id @default(autoincrement()) @map("clase_horario_id")
+  claseId        Int       @map("clase_id")
+  diaSemana      Int       @map("dia_semana") @db.SmallInt
+  horaInicio     DateTime  @map("hora_inicio") @db.Time
+  horaFin        DateTime  @map("hora_fin") @db.Time
+
+  clase          Clase     @relation(fields: [claseId], references: [id])
+
+  @@index([claseId, diaSemana])
+  @@map("clase_horarios")
+}
+
+model ClaseInscripcion {
+  id             Int       @id @default(autoincrement()) @map("clase_inscripcion_id")
+  claseId        Int       @map("clase_id")
+  socioId        Int       @map("socio_id")
+  status         EstadoGeneral @default(activo)
+  inscritoEn     DateTime  @default(now()) @map("inscrito_en")
+
+  clase          Clase     @relation(fields: [claseId], references: [id])
+  socio          Socio     @relation(fields: [socioId], references: [id])
+
+  @@map("clase_inscripciones")
+}
+
+// ==========================================================
+// 6. MÓDULO: PRODUCTOS (INVENTARIO)
+// ==========================================================
+
+model CategoriaProducto {
+  id             Int       @id @default(autoincrement()) @map("categoria_id")
+  nombre         String    @unique @db.VarChar(80)
+
+  productos      Producto[]
+
+  @@map("categorias_producto")
+}
+
+model Producto {
+  id             Int       @id @default(autoincrement()) @map("producto_id")
+  uuidProducto   String    @unique @map("uuid_producto") @db.VarChar(60)
+  categoriaId    Int       @map("categoria_id")
+  codigo         String    @unique @db.VarChar(60)
+  nombre         String    @db.VarChar(120)
+  descripcion    String?   @db.VarChar(255)
+  precio         Decimal   @db.Decimal(10,2)
+  costo          Decimal?  @db.Decimal(10,2)
+  status         EstadoGeneral @default(activo)
+  
+  // Soft Delete
+  isDeleted      Boolean   @default(false) @map("is_deleted")
+  deletedAt      DateTime? @map("deleted_at")
+
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  categoria      CategoriaProducto @relation(fields: [categoriaId], references: [id])
+  stock          InventarioStock?
+  movimientos    InventarioMovimiento[]
+  detallesCompra CompraDetalle[]
+  detallesVenta  VentaDetalle[]
+
+  @@map("productos")
+}
+
+model InventarioStock {
+  productoId     Int       @id @map("producto_id")
+  cantidad       Int       @default(0)
+  stockMinimo    Int       @default(0) @map("stock_minimo")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  producto       Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  @@map("inventario_stock")
+}
+
+model InventarioMovimiento {
+  id             Int       @id @default(autoincrement()) @map("movimiento_id")
+  productoId     Int       @map("producto_id")
+  tipo           MovimientoInvTipo
+  cantidad       Int
+  costoUnitario  Decimal?  @map("costo_unitario") @db.Decimal(10,2)
+  referenciaTipo ReferenciaInvTipo @map("referencia_tipo")
+  referenciaId   Int?      @map("referencia_id")
+  usuarioId      Int?      @map("usuario_id")
+  nota           String?   @db.VarChar(255)
+  fecha          DateTime  @default(now())
+
+  producto       Producto  @relation(fields: [productoId], references: [id])
+  usuario        Usuario?  @relation("UsuarioInvMov", fields: [usuarioId], references: [id])
+
+  @@map("inventario_movimientos")
+}
+
+// ==========================================================
+// 7. MÓDULO: COMPRAS
+// ==========================================================
+
+model Proveedor {
+  id             Int       @id @default(autoincrement()) @map("proveedor_id")
+  nombre         String    @db.VarChar(120)
+  telefono       String?   @db.VarChar(20)
+  email          String?   @db.VarChar(160)
+  status         EstadoGeneral @default(activo)
+
+  compras        Compra[]
+
+  @@map("proveedores")
+}
+
+model Compra {
+  id             Int       @id @default(autoincrement()) @map("compra_id")
+  proveedorId    Int?      @map("proveedor_id")
+  usuarioId      Int?      @map("usuario_id")
+  fechaCompra    DateTime  @default(now()) @map("fecha_compra")
+  status         CompraStatus @default(registrada)
+  total          Decimal   @db.Decimal(10,2)
+  observaciones  String?   @db.VarChar(255)
+  
+  // Soft Delete
+  isDeleted      Boolean   @default(false) @map("is_deleted")
+
+  proveedor      Proveedor? @relation(fields: [proveedorId], references: [id])
+  usuario        Usuario?   @relation("UsuarioCompra", fields: [usuarioId], references: [id])
+  detalles       CompraDetalle[]
+
+  @@map("compras")
+}
+
+model CompraDetalle {
+  id             Int       @id @default(autoincrement()) @map("compra_detalle_id")
+  compraId       Int       @map("compra_id")
+  productoId     Int       @map("producto_id")
+  cantidad       Int
+  costoUnitario  Decimal   @map("costo_unitario") @db.Decimal(10,2)
+  subtotal       Decimal   @db.Decimal(10,2)
+
+  compra         Compra    @relation(fields: [compraId], references: [id])
+  producto       Producto  @relation(fields: [productoId], references: [id])
+
+  @@map("compra_detalle")
+}
+
+// ==========================================================
+// 8. MÓDULO: VENTAS
+// ==========================================================
+
+model Venta {
+  id             Int       @id @default(autoincrement()) @map("venta_id")
+  uuidVenta      String    @unique @map("uuid_venta") @db.VarChar(60)
+  usuarioId      Int       @map("usuario_id")
+  fechaVenta     DateTime  @default(now()) @map("fecha_venta")
+  status         VentaStatus @default(exitosa)
+  subtotal       Decimal   @default(0) @db.Decimal(10,2)
+  descuento      Decimal   @default(0) @db.Decimal(10,2)
+  total          Decimal   @db.Decimal(10,2)
+  observaciones  String?   @db.VarChar(255)
+
+  // Soft Delete
+  isDeleted      Boolean   @default(false) @map("is_deleted")
+  deletedAt      DateTime? @map("deleted_at")
+
+  cajero         Usuario   @relation("UsuarioVenta", fields: [usuarioId], references: [id])
+  detalles       VentaDetalle[]
+  pagos          VentaPago[]
+
+  @@map("ventas")
+}
+
+model VentaDetalle {
+  id             Int       @id @default(autoincrement()) @map("venta_detalle_id")
+  ventaId        Int       @map("venta_id")
+  productoId     Int       @map("producto_id")
+  codigoProducto String    @map("codigo_producto") @db.VarChar(60)
+  nombreProducto String    @map("nombre_producto") @db.VarChar(120)
+  cantidad       Int
+  precioUnitario Decimal   @map("precio_unitario") @db.Decimal(10,2)
+  costoUnitario  Decimal?  @map("costo_unitario") @db.Decimal(10,2)
+  subtotalLinea  Decimal   @map("subtotal_linea") @db.Decimal(10,2)
+  gananciaLinea  Decimal?  @map("ganancia_linea") @db.Decimal(10,2)
+
+  venta          Venta     @relation(fields: [ventaId], references: [id])
+  producto       Producto  @relation(fields: [productoId], references: [id])
+
+  @@map("venta_detalle")
+}
+
+model VentaPago {
+  id             Int       @id @default(autoincrement()) @map("venta_pago_id")
+  ventaId        Int       @map("venta_id")
+  metodoPagoId   Int       @map("metodo_pago_id")
+  monto          Decimal   @db.Decimal(10,2)
+  referencia     String?   @db.VarChar(80)
+  pagadoEn       DateTime  @default(now()) @map("pagado_en")
+
+  venta          Venta     @relation(fields: [ventaId], references: [id])
+  metodoPago     MetodoPago @relation(fields: [metodoPagoId], references: [id])
+
+  @@map("venta_pagos")
+}
+
+// ==========================================================
+// 9. MÓDULO: AUDITORÍA Y SEGURIDAD
+// ==========================================================
+
+model AuditoriaLog {
+  id             Int       @id @default(autoincrement()) @map("auditoria_id")
+  usuarioId      Int?      @map("usuario_id")
+  moduloId       Int?      @map("modulo_id")
+  accion         String    @db.VarChar(60)
+  entidad        String?   @db.VarChar(60)
+  entidadId      Int?      @map("entidad_id")
+  detalle        Json?
+  ip             String?   @db.VarChar(45)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  usuario        Usuario?  @relation("UsuarioAuditoria", fields: [usuarioId], references: [id])
+
+  @@map("auditoria_log")
+}
+
+model EliminacionLog {
+  id             Int       @id @default(autoincrement()) @map("eliminacion_id")
+  usuarioId      Int       @map("usuario_id")
+  tabla          String    @db.VarChar(80)
+  registroId     Int       @map("registro_id")
+  motivo         String?   @db.VarChar(255)
+  fecha          DateTime  @default(now())
+
+  usuario        Usuario   @relation("UsuarioEliminacion", fields: [usuarioId], references: [id])
+
+  @@map("eliminaciones_log")
+}
+
+// ==========================================================
+// 11. MÓDULO: CONFIGURACIÓN
+// ==========================================================
+
+model Setting {
+  key            String    @id @map("setting_key") @db.VarChar(80)
+  value          String    @map("setting_value") @db.Text
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+  updatedBy      Int?      @map("updated_by")
+
+  usuario        Usuario?  @relation("UsuarioSetting", fields: [updatedBy], references: [id])
+
+  @@map("settings")
+}
+
+// ==========================================================
+// 12 y 13. MÓDULO: RESPALDOS Y RESTAURAR
+// ==========================================================
+
+model BackupLog {
+  id             Int       @id @default(autoincrement()) @map("backup_id")
+  tipo           BackupTipo
+  archivo        String    @db.VarChar(255)
+  rutaLocal      String    @map("ruta_local") @db.VarChar(255)
+  rutaRemota     String?   @map("ruta_remota") @db.VarChar(255)
+  tamanoMb       Decimal?  @map("tamano_mb") @db.Decimal(10,2)
+  checksum       String?   @db.VarChar(128)
+  status         ProcesoStatus
+  error          String?   @db.VarChar(255)
+  generadoPor    Int?      @map("generado_por")
+  generadoEn     DateTime  @default(now()) @map("generado_en")
+
+  usuario        Usuario?  @relation("UsuarioBackup", fields: [generadoPor], references: [id])
+  restauraciones RestoreLog[]
+
+  @@map("backups_log")
+}
+
+model RestoreLog {
+  id             Int       @id @default(autoincrement()) @map("restore_id")
+  backupId       Int       @map("backup_id")
+  restauradoPor  Int       @map("restaurado_por")
+  restauradoEn   DateTime  @default(now()) @map("restaurado_en")
+  status         ProcesoStatus
+  error          String?   @db.VarChar(255)
+
+  backup         BackupLog @relation(fields: [backupId], references: [id])
+  usuario        Usuario   @relation("UsuarioRestore", fields: [restauradoPor], references: [id])
+
+  @@map("restores_log")
+}
+
+// ==========================================================
+// 14, 17 y 18. MÓDULO: CAJA Y CONCEPTOS FINANCIEROS
+// ==========================================================
+
+model CorteCaja {
+  id             Int       @id @default(autoincrement()) @map("corte_id")
+  usuarioId      Int       @map("usuario_id")
+  inicio         DateTime
+  fin            DateTime
+  totalVentas    Decimal   @default(0) @map("total_ventas") @db.Decimal(10,2)
+  status         CorteCajaStatus @default(cerrado)
+  observaciones  String?   @db.VarChar(255)
+
+  cajero         Usuario   @relation("UsuarioCorte", fields: [usuarioId], references: [id])
+  movimientos    CajaMovimiento[]
+
+  @@map("cortes_caja")
+}
+
+model Concepto {
+  id             Int       @id @default(autoincrement()) @map("concepto_id")
+  nombre         String    @unique @db.VarChar(120)
+  tipo           ConceptoTipo
+  status         EstadoGeneral @default(activo)
+
+  movimientos    CajaMovimiento[]
+
+  @@map("conceptos")
+}
+
+model CajaMovimiento {
+  id             Int       @id @default(autoincrement()) @map("movimiento_caja_id")
+  corteId        Int?      @map("corte_id")
+  usuarioId      Int       @map("usuario_id")
+  conceptoId     Int       @map("concepto_id")
+  tipo           ConceptoTipo
+  monto          Decimal   @db.Decimal(10,2)
+  referenciaTipo CajaRefTipo @map("referencia_tipo")
+  referenciaId   Int?      @map("referencia_id")
+  nota           String?   @db.VarChar(255)
+  fecha          DateTime  @default(now())
+
+  corte          CorteCaja? @relation(fields: [corteId], references: [id])
+  usuario        Usuario    @relation("UsuarioCajaMov", fields: [usuarioId], references: [id])
+  concepto       Concepto   @relation(fields: [conceptoId], references: [id])
+
+  @@map("caja_movimientos")
+}
+
+// ==========================================================
+// 15. MÓDULO: PUERTA (ACCESOS FÍSICOS)
+// ==========================================================
+
+model Acceso {
+  id             Int       @id @default(autoincrement()) @map("acceso_id")
+  socioId        Int       @map("socio_id")
+  tipo           AccesoTipo
+  fechaHora      DateTime  @default(now()) @map("fecha_hora")
+  validado       Boolean   @default(true)
+  motivo         String?   @db.VarChar(255)
+  usuarioId      Int?      @map("usuario_id")
+  dispositivoId  String?   @map("dispositivo_id") @db.VarChar(60)
+
+  socio          Socio     @relation(fields: [socioId], references: [id])
+  validador      Usuario?  @relation("UsuarioAcceso", fields: [usuarioId], references: [id])
+
+  @@map("accesos")
+}
