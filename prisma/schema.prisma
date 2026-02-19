@@ -9,7 +9,7 @@ datasource db {
 }
 
 // ==========================================================
-// 📌 ENUMS (Listas de valores permitidos)
+// ENUMS (Listas de valores permitidos)
 // ==========================================================
 
 enum EstadoGeneral {
@@ -178,6 +178,8 @@ model Socio {
   telefono        String?   @db.VarChar(20)
   fotoUrl         String?   @map("foto_url") @db.VarChar(255)
   status          EstadoGeneral @default(activo)
+  genero          String?   @db.VarChar(20)
+  direccion       String?   @db.VarChar(255)
   
   // Soft Delete
   isDeleted       Boolean   @default(false) @map("is_deleted")
