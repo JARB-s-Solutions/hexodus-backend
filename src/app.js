@@ -17,6 +17,10 @@ app.use(express.urlencoded({ extended: true }));
 // CORS
 app.use(cors());
 
+// Logging HTTP requests
+const morganFormat = process.env.NODE_ENV === "production" ? "combined" : "dev";
+app.use(morgan(morganFormat));
+
 // RUTA DE PRUEBA
 app.get("/", (req, res) => {
     res.json({
