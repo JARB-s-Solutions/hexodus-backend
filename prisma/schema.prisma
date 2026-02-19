@@ -245,6 +245,7 @@ model MembresiaPlan {
   duracionDias   Int       @map("duracion_dias")
   precioActual   Decimal   @map("precio_actual") @db.Decimal(10,2)
   status         EstadoGeneral @default(activo)
+  descripcion    String?   @db.VarChar(255)
   createdBy      Int?      @map("created_by")
   createdAt      DateTime  @default(now()) @map("created_at")
 
