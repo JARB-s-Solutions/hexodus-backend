@@ -193,6 +193,7 @@ model Socio {
   membresias      MembresiaSocio[]
   inscripciones   ClaseInscripcion[]
   accesos         Acceso[]
+  ventas          Venta[]
 
   @@index([status])
   @@index([telefono])
@@ -475,6 +476,7 @@ model Venta {
   id             Int       @id @default(autoincrement()) @map("venta_id")
   uuidVenta      String    @unique @map("uuid_venta") @db.VarChar(60)
   usuarioId      Int       @map("usuario_id")
+  socioId        Int?      @map("socio_id")
   fechaVenta     DateTime  @default(now()) @map("fecha_venta")
   status         VentaStatus @default(exitosa)
   subtotal       Decimal   @default(0) @db.Decimal(10,2)
@@ -487,6 +489,7 @@ model Venta {
   deletedAt      DateTime? @map("deleted_at")
 
   cajero         Usuario   @relation("UsuarioVenta", fields: [usuarioId], references: [id])
+  socio          Socio?    @relation(fields: [socioId], references: [id])
   detalles       VentaDetalle[]
   pagos          VentaPago[]
 
