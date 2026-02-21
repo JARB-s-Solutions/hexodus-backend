@@ -369,6 +369,7 @@ model Producto {
   codigo         String    @unique @db.VarChar(60)
   nombre         String    @db.VarChar(120)
   descripcion    String?   @db.VarChar(255)
+  marca          String?   @db.VarChar(255)
   precio         Decimal   @db.Decimal(10,2)
   costo          Decimal?  @db.Decimal(10,2)
   status         EstadoGeneral @default(activo)
