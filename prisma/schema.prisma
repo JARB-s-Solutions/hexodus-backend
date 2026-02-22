@@ -177,6 +177,7 @@ model Socio {
   correo          String?   @db.VarChar(160)
   telefono        String?   @db.VarChar(20)
   fotoUrl         String?   @map("foto_url") @db.VarChar(255)
+  huellaTemplate  String?   @map("huella_template") @db.Text
   status          EstadoGeneral @default(activo)
   genero          String?   @db.VarChar(20)
   direccion       String?   @db.VarChar(255)
