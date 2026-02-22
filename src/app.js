@@ -11,7 +11,7 @@ const app = express();
 app.use(helmet());
 
 // Parseo del cuerpo de las peticiones (JSON y Forms)
-app.use(express.json());
+app.use(express.json({ limit: "10mb"}));
 app.use(express.urlencoded({ extended: true }));
 
 // CORS
