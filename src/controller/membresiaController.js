@@ -267,3 +267,111 @@ export const obtenerMembresia = async (req, res) => {
         res.status(500).json({ error: "Error interno al obtener los datos." });
     }
 };
+
+
+// ACTUALIZAR MEMBRESÍA (PUT)
+export const editarMembresia = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            nombre,
+            precioBase,
+            duracionCantidad, 
+            duracionUnidad,   
+            esOferta,         
+            precioOferta,     
+            fechaFinOferta,   
+            descripcion
+        } = req.body;
+
+        if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+        // Validaciones básicas
+        if (!nombre || precioBase === undefined || !duracionCantidad || !duracionUnidad) {
+            return res.status(400).json({ error: "Los campos Nombre, Precio y Configuración de Duración son obligatorios." });
+        }
+
+        // Lógica para Oferta Especial
+        if (esOferta) {
+            if (precioOferta === undefined || !fechaFinOferta) {
+                return res.status(400).json({ error: "Faltan datos de la oferta especial." });
+            }
+        }
+
+        // Conversión de Duración a Días
+        let duracionDias = 0;
+        const cantidad = parseInt(duracionCantidad);
+
+        switch (duracionUnidad.toLowerCase()) {
+            case 'dias': case 'día': case 'días': duracionDias = cantidad; break;
+            case 'semanas': case 'semana': duracionDias = cantidad * 7; break;
+            case 'meses': case 'mes': duracionDias = cantidad * 30; break;
+            case 'años': case 'año': case 'anios': duracionDias = cantidad * 365; break;
+            default: return res.status(400).json({ error: "Unidad de duración no válida." });
+        }
+
+        // Verificar que exista antes de editar
+        const existe = await prisma.membresiaPlan.findUnique({ where: { id: parseInt(id) } });
+        if (!existe) return res.status(404).json({ error: "La membresía no existe." });
+
+        // Actualizar en Base de Datos
+        const membresiaActualizada = await prisma.membresiaPlan.update({
+            where: { id: parseInt(id) },
+            data: {
+                nombre: nombre,
+                duracionDias: duracionDias,
+                precioBase: precioBase,
+                esOferta: esOferta || false,
+                precioOferta: esOferta ? precioOferta : null,
+                fechaFinOferta: esOferta ? new Date(fechaFinOferta) : null,
+                descripcion: descripcion || null,
+            }
+        });
+
+        res.status(200).json({
+            message: "Membresía actualizada correctamente",
+            data: membresiaActualizada
+        });
+
+    } catch (error) {
+        console.error("Error al editar membresía:", error);
+        res.status(500).json({ error: "Error interno al actualizar la membresía." });
+    }
+};
+
+// CAMBIAR ESTADO - ACTIVAR / DESACTIVAR
+export const cambiarStatusMembresia = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+        // Validar que el status sea exactamente el del Enum de Prisma
+        if (status !== 'activo' && status !== 'inactivo') {
+            return res.status(400).json({ error: "El status solo puede ser 'activo' o 'inactivo'." });
+        }
+
+        // Actualizar solo ese campo
+        const membresiaActualizada = await prisma.membresiaPlan.update({
+            where: { id: parseInt(id) },
+            data: { status: status }
+        });
+
+        res.status(200).json({
+            message: `Membresía marcada como ${status} exitosamente.`,
+            data: {
+                plan_id: membresiaActualizada.id,
+                status: membresiaActualizada.status
+            }
+        });
+
+    } catch (error) {
+        // P2025 es el código de error de Prisma cuando no encuentra el registro a actualizar
+        if (error.code === 'P2025') {
+            return res.status(404).json({ error: "Membresía no encontrada." });
+        }
+        console.error("Error al cambiar status:", error);
+        res.status(500).json({ error: "Error interno al cambiar el estado." });
+    }
+};

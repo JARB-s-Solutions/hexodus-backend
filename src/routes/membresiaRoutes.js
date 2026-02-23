@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { crearMembresia, listarMembresias, obtenerMembresia } from "../controller/membresiaController.js";
+import { crearMembresia, 
+    listarMembresias, 
+    obtenerMembresia, 
+    editarMembresia, 
+    cambiarStatusMembresia
+    } from "../controller/membresiaController.js";
 import { verificarToken } from "../middlewares/authMiddleware.js"
 
 const router = Router();
@@ -10,5 +15,9 @@ router.post("/", verificarToken, crearMembresia);
 router.get("/", verificarToken, listarMembresias);
 // Ruta para obtener una membresía por su ID.
 router.get("/:id", verificarToken, obtenerMembresia);
+// Ruta para editar una membresía por su ID.
+router.put("/:id", verificarToken, editarMembresia);
+// Ruta para cambiar el status de una membresía por su ID.
+router.patch("/:id/status", verificarToken, cambiarStatusMembresia);
 
 export default router;
