@@ -85,20 +85,20 @@ export const crearMembresia = async (req, res) => {
 };
 
 
-// LISTAR MEMBRESÍAS (Con filtros, paginación y conteo de socios)
+// LISTAR MEMBRESÍAS (Con filtros, paginación y ocultando los eliminados)
 export const listarMembresias = async (req, res) => {
     try {
-        // Obtener parámetros de la query (URL)
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 25;
         const skip = (page - 1) * limit;
 
         const { search, estado, tipo_dias, min_precio, max_precio } = req.query;
 
-        // Construir el objeto de filtros dinámicos (WHERE)
-        let whereClause = {};
+        let whereClause = {
+            isDeleted: false
+        };
 
-        // Filtro: Búsqueda por texto (nombre o descripción)
+        // Filtros adicionales dinámicos
         if (search) {
             whereClause.OR = [
                 { nombre: { contains: search, mode: 'insensitive' } },
@@ -106,33 +106,29 @@ export const listarMembresias = async (req, res) => {
             ];
         }
 
-        // Filtro: Estado (activo / inactivo)
         if (estado && estado !== 'Todos los Estados') {
             whereClause.status = estado;
         }
 
-        // Filtro: Tipo de Membresía (por duración en días)
         if (tipo_dias) {
             whereClause.duracionDias = parseInt(tipo_dias);
         }
 
-        // Filtro: Rango de Precio Base
         if (min_precio || max_precio) {
             whereClause.precioBase = {};
             if (min_precio) whereClause.precioBase.gte = parseFloat(min_precio);
             if (max_precio) whereClause.precioBase.lte = parseFloat(max_precio);
         }
 
-        // Ejecutar consulta a la BD
+        // Ejecutar consulta
         const [totalRecords, membresiasRaw] = await Promise.all([
             prisma.membresiaPlan.count({ where: whereClause }),
             prisma.membresiaPlan.findMany({
                 where: whereClause,
                 skip: skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' }, // Las más nuevas primero
+                orderBy: { createdAt: 'desc' },
                 include: {
-                    // Contamos cuántos socios tienen este plan "activo"
                     _count: {
                         select: {
                             membresiasSocio: {
@@ -144,16 +140,14 @@ export const listarMembresias = async (req, res) => {
             })
         ]);
 
-        // Formatear la respuesta para hacerle la vida fácil al Frontend
+        // Formatear la respuesta
         const dataFormateada = membresiasRaw.map(plan => {
-            // Generar la etiqueta del badge superior (DIARIO, SEMANAL, MENSUAL, ANUAL)
             let etiquetaTipo = 'PERSONALIZADO';
             if (plan.duracionDias === 1) etiquetaTipo = 'DIARIO';
             else if (plan.duracionDias === 7) etiquetaTipo = 'SEMANAL';
             else if (plan.duracionDias === 30) etiquetaTipo = 'MENSUAL';
             else if (plan.duracionDias === 365) etiquetaTipo = 'ANUAL';
 
-            // Evaluar si la oferta sigue vigente
             const hoy = new Date();
             const esOfertaValida = plan.esOferta && plan.fechaFinOferta && (new Date(plan.fechaFinOferta) >= hoy);
 
@@ -165,22 +159,15 @@ export const listarMembresias = async (req, res) => {
                 descripcion: plan.descripcion,
                 duracion_dias: plan.duracionDias,
                 status: plan.status,
-                
-                // Precios
                 precio_base: parseFloat(plan.precioBase),
                 es_oferta_valida: esOfertaValida,
                 precio_oferta: esOfertaValida ? parseFloat(plan.precioOferta) : null,
                 fecha_fin_oferta: esOfertaValida ? plan.fechaFinOferta : null,
-                
-                // Precio final a cobrar (calculado para el POS)
                 precio_final: esOfertaValida ? parseFloat(plan.precioOferta) : parseFloat(plan.precioBase),
-
-                // Dato calculado: Socios activos
                 socios_activos: plan._count.membresiasSocio
             };
         });
 
-        // Respuesta
         res.status(200).json({
             message: "Membresías obtenidas correctamente",
             data: dataFormateada,
@@ -373,5 +360,56 @@ export const cambiarStatusMembresia = async (req, res) => {
         }
         console.error("Error al cambiar status:", error);
         res.status(500).json({ error: "Error interno al cambiar el estado." });
+    }
+};
+
+// ELIMINAR MEMBRESÍA (Borrado Lógico / Soft Delete)
+export const eliminarMembresia = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (isNaN(id)) {
+            return res.status(400).json({ error: "ID inválido." });
+        }
+
+        // Verificar si la membresía existe y no está ya borrada
+        const membresia = await prisma.membresiaPlan.findUnique({
+            where: { id: parseInt(id) }
+        });
+
+        if (!membresia || membresia.isDeleted) {
+            return res.status(404).json({ error: "La membresía no existe o ya fue eliminada." });
+        }
+
+        // Ejecutar el borrado lógico y registrar en auditoría usando una Transacción
+        await prisma.$transaction(async (tx) => {
+            
+            // A) Ocultar la membresía y desactivarla
+            await tx.membresiaPlan.update({
+                where: { id: parseInt(id) },
+                data: { 
+                    isDeleted: true, 
+                    status: 'inactivo' // La desactivamos por seguridad extra
+                }
+            });
+
+            // B) Registrar quién lo borró en tu tabla de Auditoría
+            await tx.eliminacionLog.create({
+                data: {
+                    usuarioId: req.user.id, // Obtenido de tu token JWT
+                    tabla: 'membresia_planes',
+                    registroId: parseInt(id),
+                    motivo: "Eliminación desde el panel de gestión de membresías"
+                }
+            });
+        });
+
+        res.status(200).json({
+            message: "Membresía eliminada correctamente del sistema."
+        });
+
+    } catch (error) {
+        console.error("Error al eliminar membresía:", error);
+        res.status(500).json({ error: "Error interno al intentar eliminar la membresía." });
     }
 };
