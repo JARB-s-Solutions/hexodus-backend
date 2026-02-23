@@ -252,7 +252,10 @@ model MembresiaPlan {
   precioBase     Decimal   @map("precio_base") @db.Decimal(10,2) // Antes 'precioActual'
   esOferta       Boolean   @default(false) @map("es_oferta")     // El toggle del UI
   precioOferta   Decimal?  @map("precio_oferta") @db.Decimal(10,2) // El precio rebajado
-  fechaFinOferta DateTime? @map("fecha_fin_oferta")                // Hasta cuándo dura
+  fechaFinOferta DateTime? @map("fecha_fin_oferta")    
+  
+  // CAMPO PARA BORRADO LÓGICO
+  isDeleted      Boolean   @default(false) @map("is_deleted")            // Hasta cuándo dura
 
   createdBy      Int?      @map("created_by")
   createdAt      DateTime  @default(now()) @map("created_at")
