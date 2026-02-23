@@ -1,10 +1,14 @@
 import { Router } from "express";
-import { crearMembresia } from "../controller/membresiaController.js";
+import { crearMembresia, listarMembresias, obtenerMembresia } from "../controller/membresiaController.js";
 import { verificarToken } from "../middlewares/authMiddleware.js"
 
 const router = Router();
 
 // Ruta para crear una membresía.
 router.post("/", verificarToken, crearMembresia);
+// Lista de membresías con filtros, paginación y conteo de socios.
+router.get("/", verificarToken, listarMembresias);
+// Ruta para obtener una membresía por su ID.
+router.get("/:id", verificarToken, obtenerMembresia);
 
 export default router;

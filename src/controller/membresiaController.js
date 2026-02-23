@@ -83,3 +83,187 @@ export const crearMembresia = async (req, res) => {
         res.status(500).json({ error: "Error interno del servidor al guardar la membresía." });
     }
 };
+
+
+// LISTAR MEMBRESÍAS (Con filtros, paginación y conteo de socios)
+export const listarMembresias = async (req, res) => {
+    try {
+        // Obtener parámetros de la query (URL)
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 25;
+        const skip = (page - 1) * limit;
+
+        const { search, estado, tipo_dias, min_precio, max_precio } = req.query;
+
+        // Construir el objeto de filtros dinámicos (WHERE)
+        let whereClause = {};
+
+        // Filtro: Búsqueda por texto (nombre o descripción)
+        if (search) {
+            whereClause.OR = [
+                { nombre: { contains: search, mode: 'insensitive' } },
+                { descripcion: { contains: search, mode: 'insensitive' } }
+            ];
+        }
+
+        // Filtro: Estado (activo / inactivo)
+        if (estado && estado !== 'Todos los Estados') {
+            whereClause.status = estado;
+        }
+
+        // Filtro: Tipo de Membresía (por duración en días)
+        if (tipo_dias) {
+            whereClause.duracionDias = parseInt(tipo_dias);
+        }
+
+        // Filtro: Rango de Precio Base
+        if (min_precio || max_precio) {
+            whereClause.precioBase = {};
+            if (min_precio) whereClause.precioBase.gte = parseFloat(min_precio);
+            if (max_precio) whereClause.precioBase.lte = parseFloat(max_precio);
+        }
+
+        // Ejecutar consulta a la BD
+        const [totalRecords, membresiasRaw] = await Promise.all([
+            prisma.membresiaPlan.count({ where: whereClause }),
+            prisma.membresiaPlan.findMany({
+                where: whereClause,
+                skip: skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' }, // Las más nuevas primero
+                include: {
+                    // Contamos cuántos socios tienen este plan "activo"
+                    _count: {
+                        select: {
+                            membresiasSocio: {
+                                where: { status: 'activa' }
+                            }
+                        }
+                    }
+                }
+            })
+        ]);
+
+        // Formatear la respuesta para hacerle la vida fácil al Frontend
+        const dataFormateada = membresiasRaw.map(plan => {
+            // Generar la etiqueta del badge superior (DIARIO, SEMANAL, MENSUAL, ANUAL)
+            let etiquetaTipo = 'PERSONALIZADO';
+            if (plan.duracionDias === 1) etiquetaTipo = 'DIARIO';
+            else if (plan.duracionDias === 7) etiquetaTipo = 'SEMANAL';
+            else if (plan.duracionDias === 30) etiquetaTipo = 'MENSUAL';
+            else if (plan.duracionDias === 365) etiquetaTipo = 'ANUAL';
+
+            // Evaluar si la oferta sigue vigente
+            const hoy = new Date();
+            const esOfertaValida = plan.esOferta && plan.fechaFinOferta && (new Date(plan.fechaFinOferta) >= hoy);
+
+            return {
+                plan_id: plan.id,
+                uuid_plan: plan.uuidPlan,
+                etiqueta_tipo: etiquetaTipo,
+                nombre: plan.nombre,
+                descripcion: plan.descripcion,
+                duracion_dias: plan.duracionDias,
+                status: plan.status,
+                
+                // Precios
+                precio_base: parseFloat(plan.precioBase),
+                es_oferta_valida: esOfertaValida,
+                precio_oferta: esOfertaValida ? parseFloat(plan.precioOferta) : null,
+                fecha_fin_oferta: esOfertaValida ? plan.fechaFinOferta : null,
+                
+                // Precio final a cobrar (calculado para el POS)
+                precio_final: esOfertaValida ? parseFloat(plan.precioOferta) : parseFloat(plan.precioBase),
+
+                // Dato calculado: Socios activos
+                socios_activos: plan._count.membresiasSocio
+            };
+        });
+
+        // Respuesta
+        res.status(200).json({
+            message: "Membresías obtenidas correctamente",
+            data: dataFormateada,
+            pagination: {
+                current_page: page,
+                limit: limit,
+                total_records: totalRecords,
+                total_pages: Math.ceil(totalRecords / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error("Error al listar membresías:", error);
+        res.status(500).json({ error: "Error interno al obtener los datos." });
+    }
+};
+
+
+// OBTENER UNA MEMBRESÍA ESPECÍFICA (Por ID)
+export const obtenerMembresia = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Validar que el ID sea un número
+        if (isNaN(id)) {
+            return res.status(400).json({ error: "El ID proporcionado no es válido." });
+        }
+
+        // Buscar en la Base de Datos
+        const membresia = await prisma.membresiaPlan.findUnique({
+            where: { id: parseInt(id) }
+        });
+
+        // Validar si existe
+        if (!membresia) {
+            return res.status(404).json({ error: "Membresía no encontrada." });
+        }
+
+        // Evaluar si la oferta sigue vigente en tiempo real (Igual que en listar)
+        const hoy = new Date();
+        const esOfertaValida = membresia.esOferta && membresia.fechaFinOferta && (new Date(membresia.fechaFinOferta) >= hoy);
+
+        // Transformar duracionDias a la vista del Frontend (Opcional, pero ayuda al UI)
+        let duracionUnidad = 'días';
+        let duracionCantidad = membresia.duracionDias;
+
+        if (membresia.duracionDias === 7) { duracionCantidad = 1; duracionUnidad = 'semanas'; }
+        else if (membresia.duracionDias === 30) { duracionCantidad = 1; duracionUnidad = 'meses'; }
+        else if (membresia.duracionDias === 365) { duracionCantidad = 1; duracionUnidad = 'años'; }
+
+        // Formatear la respuesta
+        const dataFormateada = {
+            plan_id: membresia.id,
+            uuid_plan: membresia.uuidPlan,
+            nombre: membresia.nombre,
+            descripcion: membresia.descripcion,
+            
+            // Datos crudos
+            duracion_dias: membresia.duracionDias,
+            
+            // Datos formateados para que el UI pueda rellenar los selects fácilmente
+            duracion_ui: {
+                cantidad: duracionCantidad,
+                unidad: duracionUnidad
+            },
+            
+            status: membresia.status,
+            
+            // Precios
+            precio_base: parseFloat(membresia.precioBase),
+            es_oferta_valida: esOfertaValida,
+            precio_oferta: esOfertaValida ? parseFloat(membresia.precioOferta) : null,
+            fecha_fin_oferta: esOfertaValida ? membresia.fechaFinOferta : null,
+            precio_final: esOfertaValida ? parseFloat(membresia.precioOferta) : parseFloat(membresia.precioBase)
+        };
+
+        res.status(200).json({
+            message: "Membresía obtenida correctamente",
+            data: dataFormateada
+        });
+
+    } catch (error) {
+        console.error("Error al obtener membresía:", error);
+        res.status(500).json({ error: "Error interno al obtener los datos." });
+    }
+};
