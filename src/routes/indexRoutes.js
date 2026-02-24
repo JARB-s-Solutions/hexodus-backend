@@ -1,15 +1,17 @@
 import { Router } from "express";
 import authRoutes from "./authRoutes.js";
-/* import accesRoutes from "../../../PruebaGym/accesoRoutes.js"; */
 import membresiaRoutes from "./membresiaRoutes.js";
 import cronRoutes from "./cronRoutes.js";
+import socioRoutes from "./socioRoutes.js";
+import metodoPagoRoutes from "./metodoPagoRoutes.js";
 
 const router = Router();
 
-// Rutas de autenticación
 router.use("/auth", authRoutes);
-/* router.use("/acesso", accesRoutes); */
 router.use("/membresias", membresiaRoutes);
+router.use("/socios", socioRoutes);
 router.use("/cron", cronRoutes);
+router.use("/metodos-pago", metodoPagoRoutes);
+
 
 export default router;
