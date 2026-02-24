@@ -154,6 +154,7 @@ export const listarMembresias = async (req, res) => {
             return {
                 plan_id: plan.id,
                 uuid_plan: plan.uuidPlan,
+                fecha_creacion: plan.createdAt,
                 etiqueta_tipo: etiquetaTipo,
                 nombre: plan.nombre,
                 descripcion: plan.descripcion,
@@ -222,6 +223,7 @@ export const obtenerMembresia = async (req, res) => {
         const dataFormateada = {
             plan_id: membresia.id,
             uuid_plan: membresia.uuidPlan,
+            fecha_creacion: membresia.createdAt,
             nombre: membresia.nombre,
             descripcion: membresia.descripcion,
             
