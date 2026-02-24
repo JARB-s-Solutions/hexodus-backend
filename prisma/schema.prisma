@@ -177,10 +177,15 @@ model Socio {
   correo          String?   @db.VarChar(160)
   telefono        String?   @db.VarChar(20)
   fotoUrl         String?   @map("foto_url") @db.VarChar(255)
-  huellaTemplate  String?   @map("huella_template") @db.Text
   status          EstadoGeneral @default(activo)
   genero          String?   @db.VarChar(20)
   direccion       String?   @db.VarChar(255)
+
+  // BIOMETRÍA DUAL
+  huellaTemplate        String?   @map("huella_template") @db.Text
+  huellaUpdatedAt       DateTime? @map("huella_updated_at")
+  faceEncoding          Json?     @map("face_encoding") // Guarda el array [0.123, -0.456...]
+  faceEncodingUpdatedAt DateTime? @map("face_encoding_updated_at")
   
   // Soft Delete
   isDeleted       Boolean   @default(false) @map("is_deleted")
