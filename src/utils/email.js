@@ -12,7 +12,7 @@ export const sendEmail = async (options) => {
 
   // Definir opciones del correo
   const mailOptions = {
-    from: '"Soporte Exodus Gym" <no-reply@exodusgym.com>',
+    from: '"Soporte Hexodus Gym" <no-reply@exodusgym.com>',
     to: options.email,
     subject: options.subject,
     text: options.message,
