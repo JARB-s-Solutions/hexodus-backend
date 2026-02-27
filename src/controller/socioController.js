@@ -67,10 +67,6 @@ export const crearSocio = async (req, res) => {
             return res.status(400).json({ error: "El Nombre Completo y Género son obligatorios." });
         }
 
-        const partesNombre = personal.nombre_completo.trim().split(" ");
-        const nombre = partesNombre[0];
-        const apellidoPaterno = partesNombre.length > 1 ? partesNombre.slice(1).join(" ") : "Sin Apellidos";
-
         const resultadoTransaccion = await prisma.$transaction(async (tx) => {
             
             // A) CREAR SOCIO Y BIOMETRÍA ---
@@ -78,8 +74,7 @@ export const crearSocio = async (req, res) => {
                 data: {
                     uuidSocio: crypto.randomUUID(),
                     codigoSocio: `SOC-${Date.now().toString().slice(-6)}`,
-                    nombre: nombre,
-                    apellidoPaterno: apellidoPaterno,
+                    nombreCompleto: personal.nombre_completo.trim(),
                     correo: personal.correo_electronico || null,
                     telefono: personal.numero_telefono || null,
                     genero: personal.genero,
@@ -205,8 +200,7 @@ export const listarSocios = async (req, res) => {
 
         if (search) {
             whereClause.OR = [
-                { nombre: { contains: search, mode: 'insensitive' } },
-                { apellidoPaterno: { contains: search, mode: 'insensitive' } },
+                { nombreCompleto: { contains: search, mode: 'insensitive' } },
                 { codigoSocio: { contains: search, mode: 'insensitive' } },
                 { correo: { contains: search, mode: 'insensitive' } }
             ];
@@ -318,7 +312,7 @@ export const listarSocios = async (req, res) => {
             return {
                 socio_id: socio.id,
                 clave: socio.codigoSocio,
-                nombre: `${socio.nombre} ${socio.apellidoPaterno}`.trim(),
+                nombre: socio.nombreCompleto,
                 genero: socio.genero || 'N/A',
                 contacto: {
                     telefono: socio.telefono,
@@ -328,7 +322,7 @@ export const listarSocios = async (req, res) => {
                 vencimiento: membresiaActual ? membresiaActual.fechaFin : null,
                 // Validamos en tiempo real si sigue activa hoy
                 vigencia: membresiaActual ? (new Date(membresiaActual.fechaFin) >= hoy ? 'Activa' : 'Vencida') : 'N/A',
-                estado_contrato: contratoActual ? contratoActual.status : 'Sin contrato'
+                estado_contrato: contratoActual ? (contratoActual.status === 'vigente') : false
             };
         });
 
@@ -387,7 +381,7 @@ export const obtenerSocio = async (req, res) => {
         const dataFormateada = {
             // Header del Modal
             id: socio.id,
-            nombre_completo: `${socio.nombre} ${socio.apellidoPaterno}`.trim(),
+            nombre_completo: socio.nombreCompleto,
             correo: socio.correo || 'Sin correo registrado',
             foto_perfil_url: socio.fotoUrl, 
             
@@ -415,6 +409,7 @@ export const obtenerSocio = async (req, res) => {
         res.status(500).json({ error: "Error interno al obtener los datos del socio." });
     }
 };
+
 
 
 // ACTUALIZAR SOCIO (PUT)
@@ -446,9 +441,7 @@ export const actualizarSocio = async (req, res) => {
             
             if (personal) {
                 if (personal.nombre_completo) {
-                    const partesNombre = personal.nombre_completo.trim().split(" ");
-                    dataSocio.nombre = partesNombre[0];
-                    dataSocio.apellidoPaterno = partesNombre.length > 1 ? partesNombre.slice(1).join(" ") : "Sin Apellidos";
+                    dataSocio.nombreCompleto = personal.nombre_completo.trim();
                 }
                 if (personal.correo_electronico !== undefined) dataSocio.correo = personal.correo_electronico;
                 if (personal.numero_telefono !== undefined) dataSocio.telefono = personal.numero_telefono;
@@ -475,7 +468,7 @@ export const actualizarSocio = async (req, res) => {
                 });
             }
 
-            // CONTRATO
+            // --- CONTRATO ---
             if (detalles_contrato) {
                 // Buscamos su contrato más reciente
                 const contratoActual = await tx.socioContrato.findFirst({
@@ -508,15 +501,27 @@ export const actualizarSocio = async (req, res) => {
                         });
                     }
                 } else if (contratoActual && !detalles_contrato.contrato_firmado) {
-                    // Si el switch está apagado pero sí tenía contrato, lo cancelamos
-                    await tx.socioContrato.update({
-                        where: { id: contratoActual.id },
-                        data: { status: 'cancelado' }
-                    });
+                    // REGLA DE NEGOCIO: Proteger el contrato activo
+                    const hoy = new Date();
+                    hoy.setHours(0, 0, 0, 0); // Normalizamos al inicio del día
+                    
+                    const fechaFinContrato = new Date(contratoActual.fechaFin);
+                    fechaFinContrato.setHours(0, 0, 0, 0);
+
+                    // Si el contrato está vigente y su fecha final es mayor o igual a hoy, NO PERMITIR CANCELAR
+                    if (contratoActual.status === 'vigente' && fechaFinContrato >= hoy) {
+                        throw new Error("REGLA_CONTRATO_VIGENTE"); // Disparamos un error que capturaremos abajo
+                    } else {
+                        // Si ya está vencido, entonces sí permitimos apagarlo/cancelarlo
+                        await tx.socioContrato.update({
+                            where: { id: contratoActual.id },
+                            data: { status: 'cancelado' }
+                        });
+                    }
                 }
             }
 
-            // MEMBRESÍA
+            // --- MEMBRESÍA ---
             if (membresia && membresia.plan_id) {
                 // Buscamos su membresía más reciente
                 const membresiaActual = await tx.membresiaSocio.findFirst({
@@ -558,8 +563,8 @@ export const actualizarSocio = async (req, res) => {
                 }
             }
         }, {
-            maxWait: 5000,  // Espera hasta 5 segundos para que la BD esté libre
-            timeout: 20000  // Le damos 20 segundos a la transacción en lugar de 5
+            maxWait: 5000,
+            timeout: 20000 
         });
 
         res.status(200).json({
@@ -568,6 +573,77 @@ export const actualizarSocio = async (req, res) => {
 
     } catch (error) {
         console.error("Error al actualizar socio:", error);
+        
+        // 🛡️ CAPTURAMOS NUESTRA REGLA DE NEGOCIO Y MANDAMOS EL MENSAJE AL FRONTEND
+        if (error.message === "REGLA_CONTRATO_VIGENTE") {
+            return res.status(400).json({ 
+                error: "No se puede desactivar el contrato porque aún se encuentra vigente. Debe esperar a su fecha de vencimiento." 
+            });
+        }
+
         res.status(500).json({ error: "Error interno al actualizar el perfil del socio." });
+    }
+};
+
+
+// ELIMINAR SOCIO (Borrado Lógico / Soft Delete)
+export const eliminarSocio = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (isNaN(id)) {
+            return res.status(400).json({ error: "ID de socio inválido." });
+        }
+
+        const socioId = parseInt(id);
+
+        // Verificar si existe y si no está ya eliminado
+        const socioExistente = await prisma.socio.findUnique({
+            where: { id: socioId },
+            include: {
+                membresias: { where: { status: 'activa' } },
+                contratos: { where: { status: 'vigente' } }
+            }
+        });
+
+        if (!socioExistente || socioExistente.isDeleted) {
+            return res.status(404).json({ error: "Socio no encontrado o ya fue eliminado." });
+        }
+
+        // Usamos una transacción para borrar al socio y cancelar sus servicios activos
+        await prisma.$transaction(async (tx) => {
+            // Marcar al socio como eliminado e inactivo
+            await tx.socio.update({
+                where: { id: socioId },
+                data: {
+                    isDeleted: true,
+                    status: 'inactivo' // Lo pasamos a inactivo por seguridad
+                }
+            });
+
+            // Cancelar membresía activa (si tiene)
+            if (socioExistente.membresias.length > 0) {
+                await tx.membresiaSocio.update({
+                    where: { id: socioExistente.membresias[0].id },
+                    data: { status: 'cancelada' }
+                });
+            }
+
+            // Cancelar contrato vigente (si tiene)
+            if (socioExistente.contratos.length > 0) {
+                await tx.socioContrato.update({
+                    where: { id: socioExistente.contratos[0].id },
+                    data: { status: 'cancelado' }
+                });
+            }
+        });
+
+        res.status(200).json({
+            message: "Socio eliminado correctamente del sistema."
+        });
+
+    } catch (error) {
+        console.error("Error al eliminar socio:", error);
+        res.status(500).json({ error: "Error interno al intentar eliminar al socio." });
     }
 };

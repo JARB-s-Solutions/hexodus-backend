@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { crearSocio, cotizarMembresia, listarSocios, obtenerSocio, actualizarSocio } from "../controller/socioController.js";
+import { crearSocio, cotizarMembresia, listarSocios, obtenerSocio, actualizarSocio, eliminarSocio } from "../controller/socioController.js";
 import { verificarToken } from "../middlewares/authMiddleware.js";
 
 const router = Router();
@@ -17,5 +17,7 @@ router.get("/:id", verificarToken, obtenerSocio);
 
 // Ruta protegida para editar un socio
 router.put("/:id", verificarToken, actualizarSocio);
+// Ruta protegida para eliminar un socio
+router.delete("/:id", verificarToken, eliminarSocio);
 
 export default router;
