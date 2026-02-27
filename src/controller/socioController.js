@@ -344,7 +344,7 @@ export const listarSocios = async (req, res) => {
     }
 };
 
-// OBTENER UN SOCIO EN ESPECÍFICO (Optimizado para el Modal de Detalle)
+// OBTENER UN SOCIO EN ESPECÍFICO (Actualizado con Fechas y Código)
 export const obtenerSocio = async (req, res) => {
     try {
         const { id } = req.params;
@@ -356,13 +356,11 @@ export const obtenerSocio = async (req, res) => {
         const socio = await prisma.socio.findUnique({
             where: { id: parseInt(id) },
             include: {
-                // Traemos la membresía actual para el campo "Membresía:"
                 membresias: {
                     include: { plan: true },
                     orderBy: { fechaFin: 'desc' },
                     take: 1
                 },
-                // Traemos el contrato para saber si "Firmó Contrato:"
                 contratos: {
                     orderBy: { fechaFin: 'desc' },
                     take: 1
@@ -375,21 +373,36 @@ export const obtenerSocio = async (req, res) => {
         }
 
         const membresiaActual = socio.membresias[0];
-        const tieneContrato = socio.contratos.length > 0;
+        const contratoActual = socio.contratos[0];
+        const tieneContrato = !!contratoActual;
+
+        // Validar vigencia real al día de hoy
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
 
         // Formatear la respuesta
         const dataFormateada = {
-            // Header del Modal
-            id: socio.id,
+            // Header
+            codigo_socio: socio.codigoSocio,
             nombre_completo: socio.nombreCompleto,
             correo: socio.correo || 'Sin correo registrado',
             foto_perfil_url: socio.fotoUrl, 
             
-            // Cuerpo del Modal
+            // Info Personal
             genero: socio.genero || 'N/A',
             telefono: socio.telefono || 'Sin teléfono',
+            
+            // Info Membresía
             membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin membresía',
-            firmo_contrato: tieneContrato, // true o false
+            vigencia_membresia: membresiaActual ? (new Date(membresiaActual.fechaFin) >= hoy ? 'Vigente' : 'Vencida') : 'N/A',
+            fecha_inicio_membresia: membresiaActual ? membresiaActual.fechaInicio : null, 
+            fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null,      
+            
+            // Info Contrato
+            firmo_contrato: tieneContrato ? true : false,
+            estado_contrato: contratoActual ? contratoActual.status : 'N/A',
+            fecha_inicio_contrato: contratoActual ? contratoActual.fechaInicio : null, 
+            fecha_fin_contrato: contratoActual ? contratoActual.fechaFin : null,       
             
             // Biométricos
             biometrico_rostro: socio.faceEncoding ? true : false,
@@ -574,7 +587,7 @@ export const actualizarSocio = async (req, res) => {
     } catch (error) {
         console.error("Error al actualizar socio:", error);
         
-        // 🛡️ CAPTURAMOS NUESTRA REGLA DE NEGOCIO Y MANDAMOS EL MENSAJE AL FRONTEND
+        // CAPTURAMOS NUESTRA REGLA DE NEGOCIO Y MANDAMOS EL MENSAJE 
         if (error.message === "REGLA_CONTRATO_VIGENTE") {
             return res.status(400).json({ 
                 error: "No se puede desactivar el contrato porque aún se encuentra vigente. Debe esperar a su fecha de vencimiento." 
