@@ -83,7 +83,6 @@ export const crearSocio = async (req, res) => {
                     correo: personal.correo_electronico || null,
                     telefono: personal.numero_telefono || null,
                     genero: personal.genero,
-                    direccion: personal.direccion || null,
                     createdBy: req.user.id,
                     fotoUrl: biometria?.foto_perfil_url || null,
                     faceEncoding: biometria?.face_encoding || null,
