@@ -14,6 +14,15 @@ export const crearVenta = async (req, res) => {
             return res.status(400).json({ error: "El carrito de compras está vacío." });
         }
 
+        // Verificar que la caja esté abierta
+        const cajaAbierta = await prisma.corteCaja.findFirst({
+            where: { status: 'abierto' }
+        });
+
+        if (!cajaAbierta) {
+            return res.status(403).json({ error: "Operación denegada: La caja está cerrada. Debes realizar la apertura de caja primero." });
+        }
+
         // Extraer todos los IDs de los productos para buscarlos en la BD
         const productosIds = productos.map(p => parseInt(p.producto_id));
 

@@ -69,7 +69,7 @@ export const crearSocio = async (req, res) => {
 
         const resultadoTransaccion = await prisma.$transaction(async (tx) => {
             
-            // A) CREAR SOCIO Y BIOMETRÍA ---
+            // CREAR SOCIO Y BIOMETRÍA
             const nuevoSocio = await tx.socio.create({
                 data: {
                     uuidSocio: crypto.randomUUID(),
@@ -87,7 +87,7 @@ export const crearSocio = async (req, res) => {
                 }
             });
 
-            // B) CONTRATO ---
+            // CONTRATO 
             if (detalles_contrato && detalles_contrato.contrato_firmado) {
                 await tx.socioContrato.create({
                     data: {
@@ -101,7 +101,7 @@ export const crearSocio = async (req, res) => {
                 });
             }
 
-            // C) ASIGNAR MEMBRESÍA (Con o Sin Cobro en Caja) ---
+            // ASIGNAR MEMBRESÍA 
             if (membresia && membresia.plan_id) {
                 const plan = await tx.membresiaPlan.findUnique({ where: { id: parseInt(membresia.plan_id) } });
                 if (!plan) throw new Error("El plan de membresía seleccionado no existe.");
@@ -118,6 +118,13 @@ export const crearSocio = async (req, res) => {
 
                 // ¿El cajero decidió cobrar o dejar pendiente?
                 const estadoPagoUI = membresia.estado_pago || 'pagado'; // 'pagado' o 'sin_pagar'
+
+                if (estadoPagoUI === 'pagado') {
+                    const cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
+                    if (!cajaAbierta) {
+                        throw new Error("CAJA_CERRADA"); // Detiene la transacción
+                    }
+                }
 
                 const membresiaAsignada = await tx.membresiaSocio.create({
                     data: {
@@ -176,6 +183,12 @@ export const crearSocio = async (req, res) => {
 
     } catch (error) {
         console.error("Error al crear socio:", error);
+        
+        // Atrapamos el error de la caja
+        if (error.message === "CAJA_CERRADA") {
+            return res.status(403).json({ error: "Operación denegada: No puedes registrar un pago porque la caja está cerrada." });
+        }
+
         if (error.message === "El plan de membresía seleccionado no existe.") {
             return res.status(400).json({ error: error.message });
         }

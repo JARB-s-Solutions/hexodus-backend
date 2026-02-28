@@ -14,6 +14,15 @@ export const registrarCompra = async (req, res) => {
             return res.status(400).json({ error: "El nombre del proveedor es obligatorio." });
         }
 
+        // Verificar que la caja esté abierta
+        const cajaAbierta = await prisma.corteCaja.findFirst({
+            where: { status: 'abierto' }
+        });
+
+        if (!cajaAbierta) {
+            return res.status(403).json({ error: "Operación denegada: La caja está cerrada. Debes realizar la apertura de caja primero." });
+        }
+
         // Calcular el total de la compra desde el Backend
         let totalCompra = 0;
         productos.forEach(p => {
