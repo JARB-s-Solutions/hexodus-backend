@@ -7,6 +7,7 @@ import metodoPagoRoutes from "./metodoPagoRoutes.js";
 import productoRoutes from "./productoRoutes.js";
 import categoriaRoutes from "./categoriaRoutes.js";
 import compraInvRoutes from "./compraRoutes.js"
+import ventaRoutes from "./ventaRoutes.js";
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.use("/metodos-pago", metodoPagoRoutes);
 router.use("/categorias", categoriaRoutes);
 router.use("/productos", productoRoutes);
 router.use("/compras", compraInvRoutes);
+router.use("/ventas", ventaRoutes);
 
 
 export default router;
