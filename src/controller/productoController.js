@@ -83,3 +83,58 @@ export const crearProducto = async (req, res) => {
         res.status(500).json({ error: "Error interno al guardar el producto." });
     }
 };
+
+
+// LISTAR PRODUCTOS
+export const listarProductos = async (req, res) => {
+    try {
+        const { search } = req.query;
+
+        let whereClause = { isDeleted: false };
+
+        // Buscador por nombre o código
+        if (search) {
+            whereClause.OR = [
+                { nombre: { contains: search, mode: 'insensitive' } },
+                { codigo: { contains: search, mode: 'insensitive' } }
+            ];
+        }
+
+        const productos = await prisma.producto.findMany({
+            where: whereClause,
+            include: {
+                categoria: true,
+                stock: true // Traemos la tabla InventarioStock amarrada al producto
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        // Formatear para que el Frontend tenga la vida fácil
+        const dataFormateada = productos.map(p => {
+            const inventario = p.stock; // Extraemos el registro de stock
+            const cantidadActual = inventario ? inventario.cantidad : 0;
+            const minimo = inventario ? inventario.stockMinimo : 0;
+
+            return {
+                id: p.id,
+                codigo: p.codigo,
+                nombre: p.nombre,
+                categoria: p.categoria ? p.categoria.nombre : 'Sin categoría',
+                precio_compra: p.costo,
+                precio_venta: p.precio,
+                stock_actual: cantidadActual,
+                alerta_stock: cantidadActual <= minimo, 
+                status: p.status
+            };
+        });
+
+        res.status(200).json({
+            message: "Productos obtenidos",
+            data: dataFormateada
+        });
+
+    } catch (error) {
+        console.error("Error al listar productos:", error);
+        res.status(500).json({ error: "Error interno al listar los productos." });
+    }
+};
