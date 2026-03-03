@@ -9,6 +9,7 @@ import categoriaRoutes from "./categoriaRoutes.js";
 import compraInvRoutes from "./compraRoutes.js"
 import ventaRoutes from "./ventaRoutes.js";
 import cajaRoutes from "./cajaRoutes.js";
+import analisisRoutes from "./analisisRoutes.js";
 
 const router = Router();
 
@@ -22,6 +23,7 @@ router.use("/productos", productoRoutes);
 router.use("/compras", compraInvRoutes);
 router.use("/ventas", ventaRoutes);
 router.use("/caja", cajaRoutes);
+router.use("/analisis", analisisRoutes);
 
 
 export default router;
