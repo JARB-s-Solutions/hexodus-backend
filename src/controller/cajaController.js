@@ -217,3 +217,203 @@ export const realizarCorte = async (req, res) => {
         res.status(500).json({ error: "Error interno al procesar el cierre de caja." });
     }
 };
+
+
+// 4. LISTAR HISTORIAL DE CORTES (Con Filtros y KPIs)
+export const listarCortes = async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const { fecha_inicio, fecha_fin } = req.query;
+
+        // Filtro de Fechas 
+        let whereClause = {};
+        if (fecha_inicio && fecha_fin) {
+            whereClause.inicio = {
+                gte: new Date(`${fecha_inicio}T00:00:00.000Z`),
+                lte: new Date(`${fecha_fin}T23:59:59.999Z`)
+            };
+        }
+
+        // Ejecutar consultas en paralelo para máxima velocidad
+        const hoyInicio = new Date(); hoyInicio.setHours(0, 0, 0, 0);
+        const hoyFin = new Date(hoyInicio); hoyFin.setHours(23, 59, 59, 999);
+
+        const [totalRecords, cortesPaginados, cajaAbierta, movimientosHoy, ultimoCorteCerrado, totalCortesCerrados] = await Promise.all([
+            prisma.corteCaja.count({ where: whereClause }),
+            
+            prisma.corteCaja.findMany({
+                where: whereClause,
+                skip: skip,
+                take: limit,
+                orderBy: { inicio: 'desc' },
+                include: {
+                    cajero: { select: { username: true, nombreCompleto: true } },
+                    movimientos: { include: { concepto: true } } 
+                }
+            }),
+
+            prisma.corteCaja.findFirst({
+                where: { status: 'abierto' },
+                include: { movimientos: { include: { concepto: true } } }
+            }),
+
+            prisma.cajaMovimiento.findMany({
+                where: { fecha: { gte: hoyInicio, lte: hoyFin } },
+                include: { concepto: true }
+            }),
+
+            prisma.corteCaja.findFirst({
+                where: { status: 'cerrado' },
+                orderBy: { fin: 'desc' }
+            }),
+
+            prisma.corteCaja.count({ where: { status: 'cerrado' } })
+        ]);
+
+        // Calcular KPIs 
+        let efectivoFondoActual = 0, efectivoIngresosActual = 0, efectivoEgresosActual = 0;
+        if (cajaAbierta) {
+            cajaAbierta.movimientos.forEach(mov => {
+                const monto = parseFloat(mov.monto);
+                if (mov.concepto.nombre === 'Apertura / Fondo de Caja') efectivoFondoActual += monto;
+                else if (mov.tipo === 'ingreso') efectivoIngresosActual += monto;
+                else if (mov.tipo === 'gasto') efectivoEgresosActual += monto;
+            });
+        }
+        const efectivoTotalActual = efectivoFondoActual + efectivoIngresosActual - efectivoEgresosActual;
+        const gananciaNetaActual = efectivoIngresosActual - efectivoEgresosActual;
+
+        let ingresosHoy = 0, transaccionesHoy = 0;
+        movimientosHoy.forEach(mov => {
+            if (mov.tipo === 'ingreso' && mov.concepto.nombre !== 'Apertura / Fondo de Caja') {
+                ingresosHoy += parseFloat(mov.monto);
+                transaccionesHoy++;
+            }
+        });
+
+        const dashboard_stats = {
+            efectivo_caja: { total: efectivoTotalActual, fondo: efectivoFondoActual, variacion: gananciaNetaActual },
+            total_hoy: { total: ingresosHoy, transacciones: transaccionesHoy },
+            cortes_realizados: { total: totalCortesCerrados, ultimo: ultimoCorteCerrado ? ultimoCorteCerrado.fin : null }
+        };
+
+        // Formatear la Tabla
+        const dataFormateada = cortesPaginados.map(corte => {
+            let cajaInicial = 0, ingresos = 0, egresos = 0;
+
+            corte.movimientos.forEach(mov => {
+                const monto = parseFloat(mov.monto);
+                if (mov.concepto.nombre === 'Apertura / Fondo de Caja') cajaInicial += monto;
+                else if (mov.tipo === 'ingreso') ingresos += monto;
+                else if (mov.tipo === 'gasto') egresos += monto;
+            });
+
+            return {
+                id: corte.id,
+                folio: `CC-${corte.id.toString().padStart(4, '0')}`, // Ej: CC-0001
+                fecha_inicio: corte.inicio,
+                fecha_fin: corte.status === 'abierto' ? null : corte.fin,
+                ingresos: ingresos,
+                egresos: egresos,
+                caja_inicial: cajaInicial,
+                caja_final: cajaInicial + ingresos - egresos,
+                usuario: corte.cajero.username,
+                fecha_creacion: corte.inicio,
+                observacion: corte.observaciones || '-',
+                status: corte.status
+            };
+        });
+
+        res.status(200).json({
+            message: "Historial de cortes obtenido",
+            dashboard_stats,
+            data: dataFormateada,
+            pagination: { current_page: page, limit, total_records: totalRecords, total_pages: Math.ceil(totalRecords / limit) }
+        });
+
+    } catch (error) {
+        console.error("Error al listar cortes:", error);
+        res.status(500).json({ error: "Error interno al obtener el historial de caja." });
+    }
+};
+
+
+// OBTENER DETALLE DE UN CORTE ESPECÍFICO
+export const obtenerCorteDetalle = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (isNaN(id)) {
+            return res.status(400).json({ error: "ID de corte inválido." });
+        }
+
+        const corte = await prisma.corteCaja.findUnique({
+            where: { id: parseInt(id) },
+            include: {
+                cajero: { select: { nombreCompleto: true, username: true } },
+                movimientos: {
+                    include: { concepto: true, usuario: { select: { nombreCompleto: true } } },
+                    orderBy: { fecha: 'asc' }
+                }
+            }
+        });
+
+        if (!corte) {
+            return res.status(404).json({ error: "Corte de caja no encontrado." });
+        }
+
+        let cajaInicial = 0, ingresos = 0, egresos = 0;
+
+        const movimientosFormateados = corte.movimientos.map(mov => {
+            const monto = parseFloat(mov.monto);
+            
+            if (mov.concepto.nombre === 'Apertura / Fondo de Caja') cajaInicial += monto;
+            else if (mov.tipo === 'ingreso') ingresos += monto;
+            else if (mov.tipo === 'gasto') egresos += monto;
+
+            return {
+                id: mov.id,
+                folio_movimiento: `MOV-${mov.id.toString().padStart(4, '0')}`,
+                fecha: mov.fecha,
+                concepto: mov.concepto.nombre,
+                tipo: mov.tipo,
+                monto: monto,
+                usuario: mov.usuario.nombreCompleto
+            };
+        });
+
+        // Estructura exacta para las 8 tarjetas de tu modal
+        const dataFormateada = {
+            id_corte: corte.id,
+            folio: `CC-${corte.id.toString().padStart(4, '0')}`,
+            estado: corte.status,
+            
+            // Tarjetas Superiores
+            fecha_inicio: corte.inicio,
+            fecha_fin: corte.status === 'abierto' ? 'Caja Abierta' : corte.fin,
+            usuario: corte.cajero.username,
+            creado: corte.inicio,
+            
+            // Tarjetas Inferiores
+            total_ingresos: ingresos,
+            total_egresos: egresos,
+            caja_inicial: cajaInicial,
+            caja_final: cajaInicial + ingresos - egresos,
+            
+            observaciones: corte.observaciones || 'Sin observaciones',
+            movimientos: movimientosFormateados
+        };
+
+        res.status(200).json({
+            message: "Detalle del corte obtenido",
+            data: dataFormateada
+        });
+
+    } catch (error) {
+        console.error("Error al obtener detalle del corte:", error);
+        res.status(500).json({ error: "Error interno al obtener el detalle." });
+    }
+};
