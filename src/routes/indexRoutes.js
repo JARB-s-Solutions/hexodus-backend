@@ -11,6 +11,7 @@ import ventaRoutes from "./ventaRoutes.js";
 import cajaRoutes from "./cajaRoutes.js";
 import analisisRoutes from "./analisisRoutes.js";
 import conceptoRoutes from "./conceptoRoutes.js";
+import cajaMovimientoRoutes from "./cajaMovimientosRoutes.js";
 
 const router = Router();
 
@@ -26,6 +27,6 @@ router.use("/ventas", ventaRoutes);
 router.use("/caja", cajaRoutes);
 router.use("/analisis", analisisRoutes);
 router.use("/conceptos", conceptoRoutes);
-
+router.use("/movimientos", cajaMovimientoRoutes);
 
 export default router;
