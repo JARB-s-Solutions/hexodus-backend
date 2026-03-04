@@ -2,7 +2,9 @@ import { Router } from "express";
 import { 
     abrirCaja,
     consultarCorte,
-    realizarCorte
+    realizarCorte,
+    listarCortes,
+    obtenerCorteDetalle
 } from "../controller/cajaController.js";
 import { verificarToken } from "../middlewares/authMiddleware.js";
 
@@ -14,5 +16,9 @@ router.post("/abrir", verificarToken, abrirCaja);
 router.post("/consultar", verificarToken, consultarCorte);
 // Ruta para realizar corte
 router.post("/cerrar", verificarToken, realizarCorte);
+// Ruta para listar cortes
+router.get("/cortes", verificarToken, listarCortes);
+// Ruta para obtener detalle de un corte
+router.get("/cortes/:id", verificarToken, obtenerCorteDetalle);
 
 export default router;
