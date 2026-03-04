@@ -1,6 +1,6 @@
 import prisma from "../config/prisma.js";
 
-// 1. ABRIR CAJA
+// ABRIR CAJA (Fondo inicial) 
 export const abrirCaja = async (req, res) => {
     try {
         const { monto_inicial } = req.body;
@@ -12,6 +12,17 @@ export const abrirCaja = async (req, res) => {
 
         if (cajaAbierta) {
             return res.status(400).json({ error: "Ya existe un turno de caja abierto. Debes cerrarlo primero." });
+        }
+
+        // Verificar que el concepto base exista ANTES de mover nada
+        const conceptoApertura = await prisma.concepto.findFirst({
+            where: { nombre: { equals: 'Apertura / Fondo de Caja', mode: 'insensitive' } }
+        });
+
+        if (!conceptoApertura) {
+            return res.status(400).json({ 
+                error: "El concepto 'Apertura / Fondo de Caja' no existe en el catálogo. Pídele al administrador que lo cree antes de intentar abrir la caja." 
+            });
         }
 
         // Transacción para crear el Corte y el Movimiento inicial
@@ -28,18 +39,13 @@ export const abrirCaja = async (req, res) => {
                 }
             });
 
-            // Registrar el ingreso del "Fondo de Caja"
-            let conceptoApertura = await tx.concepto.findFirst({ where: { nombre: 'Apertura / Fondo de Caja' } });
-            if (!conceptoApertura) {
-                conceptoApertura = await tx.concepto.create({ data: { nombre: 'Apertura / Fondo de Caja', tipo: 'ingreso' } });
-            }
-
+            // Registrar el ingreso del "Fondo de Caja" (Si declararon dinero)
             if (monto_inicial && parseFloat(monto_inicial) > 0) {
                 await tx.cajaMovimiento.create({
                     data: {
                         corteId: nuevoCorte.id,
                         usuarioId: req.user.id,
-                        conceptoId: conceptoApertura.id,
+                        conceptoId: conceptoApertura.id, // Usamos el ID del concepto que ya confirmamos que existe
                         tipo: 'ingreso',
                         monto: parseFloat(monto_inicial),
                         referenciaTipo: 'otro',

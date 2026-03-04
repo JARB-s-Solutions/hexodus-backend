@@ -10,6 +10,7 @@ import compraInvRoutes from "./compraRoutes.js"
 import ventaRoutes from "./ventaRoutes.js";
 import cajaRoutes from "./cajaRoutes.js";
 import analisisRoutes from "./analisisRoutes.js";
+import conceptoRoutes from "./conceptoRoutes.js";
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.use("/compras", compraInvRoutes);
 router.use("/ventas", ventaRoutes);
 router.use("/caja", cajaRoutes);
 router.use("/analisis", analisisRoutes);
+router.use("/conceptos", conceptoRoutes);
 
 
 export default router;
