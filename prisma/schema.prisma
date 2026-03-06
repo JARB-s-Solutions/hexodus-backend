@@ -90,6 +90,11 @@ enum CajaRefTipo {
   otro
 }
 
+enum CategoriaEstado {
+  activa
+  inactiva
+}
+
 // ==========================================================
 // 1 y 2. MÓDULO: USUARIOS Y ROLES
 // ==========================================================
@@ -368,10 +373,17 @@ model ClaseInscripcion {
 // ==========================================================
 
 model CategoriaProducto {
-  id             Int       @id @default(autoincrement()) @map("categoria_id")
-  nombre         String    @unique @db.VarChar(80)
+  id          Int             @id @default(autoincrement())
+  nombre      String          @unique @db.VarChar(100)
+  prefijo     String?         @unique @db.VarChar(6)
+  color       String          @default("#6B7280") @db.VarChar(7)
+  descripcion String?         @db.Text
+  estado      CategoriaEstado @default(activa)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
 
-  productos      Producto[]
+  // Relación con Productos (Asegúrate de que tu modelo Producto tenga la relación)
+  productos   Producto[]
 
   @@map("categorias_producto")
 }
