@@ -145,7 +145,7 @@ export const crearSocio = async (req, res) => {
                 const esOfertaActiva = plan.esOferta && plan.fechaFinOferta && new Date(plan.fechaFinOferta) >= hoy;
                 const precioFinal = esOfertaActiva ? plan.precioOferta : plan.precioBase;
 
-                const estadoPagoUI = membresia.estado_pago || 'pagado'; 
+                const estadoPagoUI = membresia.estado_pago || 'sin_pagar'; 
                 
                 let cajaAbierta = null;
                 if (estadoPagoUI === 'pagado') {
@@ -328,6 +328,7 @@ export const listarSocios = async (req, res) => {
                 membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin membresía',
                 vencimiento: membresiaActual ? membresiaActual.fechaFin : null,
                 vigencia: membresiaActual ? (new Date(membresiaActual.fechaFin) >= hoy ? 'Activa' : 'Vencida') : 'N/A',
+                estado_pago: membresiaActual ? membresiaActual.estadoPago : 'N/A',
                 estado_contrato: contratoActual ? (contratoActual.status === 'vigente') : false
             };
         });
@@ -382,6 +383,7 @@ export const obtenerSocio = async (req, res) => {
             telefono: socio.telefono || 'Sin teléfono',
             membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin membresía',
             vigencia_membresia: membresiaActual ? (new Date(membresiaActual.fechaFin) >= hoy ? 'Vigente' : 'Vencida') : 'N/A',
+            estado_pago: membresiaActual ? membresiaActual.estadoPago : 'N/A',
             fecha_inicio_membresia: membresiaActual ? membresiaActual.fechaInicio : null, 
             fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null,      
             firmo_contrato: tieneContrato ? true : false,
