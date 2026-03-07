@@ -714,3 +714,231 @@ export const eliminarSocio = async (req, res) => {
         res.status(500).json({ error: "Error interno al intentar eliminar al socio." });
     }
 };
+
+
+// 6. HISTORIAL DE MEMBRESÍAS Y PAGOS
+export const obtenerHistorialMembresias = async (req, res) => {
+    try {
+        const socioId = parseInt(req.params.id);
+        if (isNaN(socioId)) return res.status(400).json({ error: "ID de socio inválido." });
+
+        const socio = await prisma.socio.findUnique({
+            where: { id: socioId },
+            select: { id: true, nombreCompleto: true, codigoSocio: true }
+        });
+
+        if (!socio) return res.status(404).json({ error: "Socio no encontrado." });
+
+        const membresias = await prisma.membresiaSocio.findMany({
+            where: { socioId: socioId },
+            orderBy: { fechaInicio: 'desc' },
+            include: {
+                plan: { select: { nombre: true, duracionDias: true } },
+                pagos: {
+                    include: {
+                        metodoPago: { select: { nombre: true } },
+                        cobrador: { select: { nombreCompleto: true } }
+                    }
+                },
+                usuarioAsigna: { select: { nombreCompleto: true } }
+            }
+        });
+
+        const dataFormateada = membresias.map(m => ({
+            id_membresia_socio: m.id,
+            plan: m.plan.nombre,
+            fecha_inicio: m.fechaInicio,
+            fecha_fin: m.fechaFin,
+            status_vigencia: m.status, // activa, vencida, cancelada
+            estado_pago: m.estadoPago, // pagado, sin_pagar
+            precio_cobrado: m.precioCongelado,
+            asignado_por: m.usuarioAsigna?.nombreCompleto || 'Sistema',
+            pagos: m.pagos.map(p => ({
+                id_pago: p.id,
+                monto: p.monto,
+                metodo_pago: p.metodoPago.nombre,
+                fecha_pago: p.pagadoEn,
+                recibido_por: p.cobrador?.nombreCompleto || 'Sistema'
+            }))
+        }));
+
+        res.status(200).json({
+            message: "Historial obtenido exitosamente",
+            data: { socio, historial: dataFormateada }
+        });
+
+    } catch (error) {
+        console.error("Error al obtener historial:", error);
+        res.status(500).json({ error: "Error interno al obtener el historial." });
+    }
+};
+
+// 7. PAGAR MEMBRESÍA PENDIENTE (Atrasada)
+export const pagarMembresiaPendiente = async (req, res) => {
+    try {
+        const socioId = parseInt(req.params.id);
+        const { membresia_socio_id, metodo_pago_id } = req.body; // membresia_socio_id ahora es opcional
+
+        if (isNaN(socioId)) {
+            return res.status(400).json({ error: "Faltan datos obligatorios." });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            const cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
+            if (!cajaAbierta) throw new Error("CAJA_CERRADA");
+
+            let membresia;
+
+            // CASO A: El Front manda el ID específico a pagar
+            if (membresia_socio_id) {
+                membresia = await tx.membresiaSocio.findUnique({ 
+                    where: { id: parseInt(membresia_socio_id) }, 
+                    include: { socio: true } 
+                });
+                if (!membresia) throw new Error("NOT_FOUND:La membresía no existe.");
+                if (membresia.socioId !== socioId) throw new Error("UX_ERROR:La membresía no pertenece a este socio. Verifica no estar enviando el plan_id.");
+            } 
+            // CASO B: El Front no manda ID, buscamos la deuda automáticamente
+            else {
+                membresia = await tx.membresiaSocio.findFirst({
+                    where: { socioId: socioId, estadoPago: 'sin_pagar' },
+                    orderBy: { fechaInicio: 'desc' }, // Tomamos la más reciente
+                    include: { socio: true }
+                });
+                if (!membresia) throw new Error("UX_ERROR:Este socio no tiene membresías pendientes de pago.");
+            }
+
+            if (membresia.estadoPago === 'pagado') throw new Error("UX_ERROR:Esta membresía ya se encuentra pagada.");
+
+            const metodoPagoIdValido = await validarMetodoPago(tx, metodo_pago_id);
+
+            // 1. Crear el recibo de pago
+            await tx.pagoMembresia.create({
+                data: {
+                    membresiaSocioId: membresia.id,
+                    metodoPagoId: metodoPagoIdValido,
+                    monto: membresia.precioCongelado,
+                    recibidoPor: req.user.id
+                }
+            });
+
+            // 2. Ingresar el dinero a la caja
+            let concepto = await tx.concepto.findFirst({ where: { nombre: 'Inscripción / Membresía' } });
+            if (!concepto) concepto = await tx.concepto.create({ data: { nombre: 'Inscripción / Membresía', tipo: 'ingreso' } });
+
+            await tx.cajaMovimiento.create({
+                data: {
+                    corteId: cajaAbierta.id,
+                    usuarioId: req.user.id,
+                    conceptoId: concepto.id,
+                    tipo: 'ingreso',
+                    monto: membresia.precioCongelado,
+                    referenciaTipo: 'membresia',
+                    referenciaId: membresia.id,
+                    nota: `Pago de membresía atrasada. Socio: ${membresia.socio.codigoSocio}`
+                }
+            });
+
+            // 3. Actualizar el estatus a PAGADO
+            await tx.membresiaSocio.update({
+                where: { id: membresia.id },
+                data: { estadoPago: 'pagado' }
+            });
+        });
+
+        res.status(200).json({ message: "Pago registrado correctamente en caja." });
+
+    } catch (error) {
+        console.error("Error al pagar membresía:", error);
+        if (error.message.startsWith("UX_ERROR:")) return res.status(400).json({ error: error.message.replace("UX_ERROR:", "") });
+        if (error.message.startsWith("NOT_FOUND:")) return res.status(404).json({ error: error.message.replace("NOT_FOUND:", "") });
+        if (error.message === "CAJA_CERRADA") return res.status(403).json({ error: "No puedes registrar el pago porque la caja está cerrada." });
+        res.status(500).json({ error: "Error interno al procesar el pago." });
+    }
+};
+
+// 8. RENOVAR MEMBRESÍA (Crear nuevo ciclo)
+export const renovarMembresia = async (req, res) => {
+    try {
+        const socioId = parseInt(req.params.id);
+        const { plan_id, metodo_pago_id, fecha_inicio } = req.body;
+
+        if (isNaN(socioId) || !plan_id) {
+            return res.status(400).json({ error: "El socio y el plan son obligatorios para renovar." });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            const socio = await tx.socio.findUnique({ where: { id: socioId, isDeleted: false } });
+            if (!socio) throw new Error("NOT_FOUND:Socio no encontrado.");
+
+            const cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
+            if (!cajaAbierta) throw new Error("CAJA_CERRADA");
+
+            const plan = await tx.membresiaPlan.findUnique({ where: { id: parseInt(plan_id) } });
+            if (!plan) throw new Error("NOT_FOUND:El plan seleccionado no existe.");
+
+            // Lógica inteligente de fechas: 
+            // Si el front manda una fecha, la usamos. Si no, arranca hoy.
+            const fechaInicioReal = fecha_inicio ? validarFecha(fecha_inicio, 'Inicio de Renovación') : new Date();
+            const fechaFinReal = new Date(fechaInicioReal);
+            fechaFinReal.setDate(fechaFinReal.getDate() + plan.duracionDias);
+
+            // Calcular ofertas
+            const hoy = new Date();
+            const esOfertaActiva = plan.esOferta && plan.fechaFinOferta && new Date(plan.fechaFinOferta) >= hoy;
+            const precioFinal = esOfertaActiva ? plan.precioOferta : plan.precioBase;
+
+            // 1. Crear nueva membresía
+            const nuevaMembresia = await tx.membresiaSocio.create({
+                data: {
+                    uuidMembresiaSocio: crypto.randomUUID(),
+                    socioId: socio.id,
+                    planId: plan.id,
+                    fechaInicio: fechaInicioReal,
+                    fechaFin: fechaFinReal,
+                    status: 'activa',
+                    estadoPago: 'pagado', // Asumimos que la renovación se paga en el momento
+                    precioCongelado: precioFinal,
+                    asignadoPor: req.user.id
+                }
+            });
+
+            // 2. Registrar pago y movimiento de caja
+            const metodoPagoIdValido = await validarMetodoPago(tx, metodo_pago_id);
+
+            await tx.pagoMembresia.create({
+                data: {
+                    membresiaSocioId: nuevaMembresia.id,
+                    metodoPagoId: metodoPagoIdValido,
+                    monto: precioFinal,
+                    recibidoPor: req.user.id
+                }
+            });
+
+            let concepto = await tx.concepto.findFirst({ where: { nombre: 'Renovación de Membresía' } });
+            if (!concepto) concepto = await tx.concepto.create({ data: { nombre: 'Renovación de Membresía', tipo: 'ingreso' } });
+
+            await tx.cajaMovimiento.create({
+                data: {
+                    corteId: cajaAbierta.id,
+                    usuarioId: req.user.id,
+                    conceptoId: concepto.id,
+                    tipo: 'ingreso',
+                    monto: precioFinal,
+                    referenciaTipo: 'membresia',
+                    referenciaId: nuevaMembresia.id,
+                    nota: `Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
+                }
+            });
+        });
+
+        res.status(201).json({ message: "Membresía renovada y cobrada exitosamente." });
+
+    } catch (error) {
+        console.error("Error al renovar:", error);
+        if (error.message.startsWith("UX_ERROR:")) return res.status(400).json({ error: error.message.replace("UX_ERROR:", "") });
+        if (error.message.startsWith("NOT_FOUND:")) return res.status(404).json({ error: error.message.replace("NOT_FOUND:", "") });
+        if (error.message === "CAJA_CERRADA") return res.status(403).json({ error: "No puedes renovar porque la caja está cerrada." });
+        res.status(500).json({ error: "Error interno al procesar la renovación." });
+    }
+};

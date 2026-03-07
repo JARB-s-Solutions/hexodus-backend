@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { crearSocio, cotizarMembresia, listarSocios, obtenerSocio, actualizarSocio, eliminarSocio } from "../controller/socioController.js";
+import { crearSocio, cotizarMembresia, listarSocios, obtenerSocio, actualizarSocio, eliminarSocio,
+    obtenerHistorialMembresias, 
+    pagarMembresiaPendiente, 
+    renovarMembresia
+ } from "../controller/socioController.js";
 import { verificarToken } from "../middlewares/authMiddleware.js";
 
 const router = Router();
@@ -19,5 +23,11 @@ router.get("/:id", verificarToken, obtenerSocio);
 router.put("/:id", verificarToken, actualizarSocio);
 // Ruta protegida para eliminar un socio
 router.delete("/:id", verificarToken, eliminarSocio);
+
+router.get("/:id/historial-pagos", verificarToken, obtenerHistorialMembresias);
+
+router.post("/:id/pagar-membresia", verificarToken, pagarMembresiaPendiente);
+
+router.post("/:id/renovar", verificarToken, renovarMembresia);
 
 export default router;
