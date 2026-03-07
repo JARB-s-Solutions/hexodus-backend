@@ -1,7 +1,9 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
 
-// REGISTRAR NUEVA VENTA (Punto de Venta)
+
+// REGISTRAR NUEVA VENTA (Punto de Venta) 
+
 export const crearVenta = async (req, res) => {
     try {
         const { socio_id, metodo_pago_id, productos } = req.body;
