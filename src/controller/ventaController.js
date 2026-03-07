@@ -10,8 +10,8 @@ export const crearVenta = async (req, res) => {
         if (!metodo_pago_id) {
             return res.status(400).json({ error: "Debes seleccionar un método de pago." });
         }
-        if (!productos || productos.length === 0) {
-            return res.status(400).json({ error: "El carrito de compras está vacío." });
+        if (!productos || !Array.isArray(productos) || productos.length === 0) {
+            return res.status(400).json({ error: "El carrito de compras está vacío o es inválido." });
         }
 
         // Verificar que la caja esté abierta
@@ -23,8 +23,39 @@ export const crearVenta = async (req, res) => {
             return res.status(403).json({ error: "Operación denegada: La caja está cerrada. Debes realizar la apertura de caja primero." });
         }
 
-        // Extraer todos los IDs de los productos para buscarlos en la BD
-        const productosIds = productos.map(p => parseInt(p.producto_id));
+        // Consolidación y Validación de Cantidades
+        const carritoConsolidadoMap = new Map();
+
+        for (const item of productos) {
+            const prodId = parseInt(item.producto_id);
+            const cantidadParseada = parseInt(item.cantidad);
+
+            // FIX 1: Bloquear cantidades negativas o en cero (Evita inyección de stock y montos negativos)
+            if (isNaN(cantidadParseada) || cantidadParseada <= 0) {
+                return res.status(400).json({ 
+                    error: `Operación rechazada. La cantidad para el producto ID ${item.producto_id} debe ser mayor a 0.` 
+                });
+            }
+
+            if (isNaN(prodId)) {
+                return res.status(400).json({ error: "ID de producto inválido en el carrito." });
+            }
+
+            // FIX 2: Consolidar duplicados (Si dan doble clic, sumamos las cantidades en una sola línea)
+            if (carritoConsolidadoMap.has(prodId)) {
+                const productoExistente = carritoConsolidadoMap.get(prodId);
+                productoExistente.cantidad += cantidadParseada;
+            } else {
+                carritoConsolidadoMap.set(prodId, {
+                    producto_id: prodId,
+                    cantidad: cantidadParseada
+                });
+            }
+        }
+
+        // Convertimos el Map de vuelta a un arreglo limpio sin duplicados
+        const productosConsolidados = Array.from(carritoConsolidadoMap.values());
+        const productosIds = productosConsolidados.map(p => p.producto_id);
 
         // Traer la información real de la BD (Precios y Stock) por seguridad
         const productosDB = await prisma.producto.findMany({
@@ -32,6 +63,7 @@ export const crearVenta = async (req, res) => {
             include: { stock: true }
         });
 
+        // Ahora la comparación de longitud es 100% segura porque quitamos repetidos
         if (productosDB.length !== productosIds.length) {
             return res.status(400).json({ error: "Uno o más productos no existen o están inactivos." });
         }
@@ -40,15 +72,16 @@ export const crearVenta = async (req, res) => {
         let totalVenta = 0;
         const detallesVenta = [];
 
-        for (const itemFront of productos) {
-            const prodDB = productosDB.find(p => p.id === parseInt(itemFront.producto_id));
-            const cantidadVender = parseInt(itemFront.cantidad);
+        // USAMOS EL CARRITO CONSOLIDADO, NO EL ORIGINAL
+        for (const itemFront of productosConsolidados) {
+            const prodDB = productosDB.find(p => p.id === itemFront.producto_id);
+            const cantidadVender = itemFront.cantidad;
 
             // Verificar Stock
             const stockActual = prodDB.stock ? prodDB.stock.cantidad : 0;
             if (stockActual < cantidadVender) {
                 return res.status(400).json({ 
-                    error: `Stock insuficiente para '${prodDB.nombre}'. Disponibles: ${stockActual}` 
+                    error: `Stock insuficiente para '${prodDB.nombre}'. Solicitas ${cantidadVender} pero solo hay ${stockActual} disponibles.` 
                 });
             }
 
@@ -63,7 +96,7 @@ export const crearVenta = async (req, res) => {
             // Armar el objeto para VentaDetalle
             detallesVenta.push({
                 productoId: prodDB.id,
-                codigoProducto: prodDB.codigo, // Guardamos copia por si el producto cambia en el futuro
+                codigoProducto: prodDB.codigo, 
                 nombreProducto: prodDB.nombre,
                 cantidad: cantidadVender,
                 precioUnitario: precioVenta,
@@ -80,11 +113,11 @@ export const crearVenta = async (req, res) => {
             const nuevaVenta = await tx.venta.create({
                 data: {
                     uuidVenta: crypto.randomUUID(),
-                    usuarioId: req.user.id, // El cajero
-                    socioId: socio_id ? parseInt(socio_id) : null, // Si es cliente de paso, queda null
+                    usuarioId: req.user.id, 
+                    socioId: socio_id ? parseInt(socio_id) : null, 
                     status: 'exitosa',
                     subtotal: totalVenta,
-                    descuento: 0, // Aquí podrías integrar lógica de descuentos después
+                    descuento: 0, 
                     total: totalVenta
                 }
             });
@@ -103,7 +136,7 @@ export const crearVenta = async (req, res) => {
                 
                 await tx.inventarioStock.update({
                     where: { productoId: detalle.productoId },
-                    data: { cantidad: stockActual.cantidad - detalle.cantidad }
+                    data: { cantidad: stockActual.cantidad - detalle.cantidad } // Ahora esto NUNCA sumará por accidente
                 });
 
                 await tx.inventarioMovimiento.create({
@@ -131,12 +164,13 @@ export const crearVenta = async (req, res) => {
 
             // Registrar INGRESO en la Caja
             let conceptoVenta = await tx.concepto.findFirst({ where: { nombre: 'Venta de Productos' } });
-            if (!conceptoVenta) { // Crearlo si no existe
+            if (!conceptoVenta) { 
                 conceptoVenta = await tx.concepto.create({ data: { nombre: 'Venta de Productos', tipo: 'ingreso' } });
             }
 
             await tx.cajaMovimiento.create({
                 data: {
+                    corteId: cajaAbierta.id, // Lo atamos al corte actual (Buena práctica añadida)
                     usuarioId: req.user.id,
                     conceptoId: conceptoVenta.id,
                     tipo: 'ingreso',
@@ -197,7 +231,6 @@ export const listarVentas = async (req, res) => {
                 { detalles: { some: { nombreProducto: { contains: search, mode: 'insensitive' } } } }
             ];
 
-            // Si el texto tiene números (ej. "V-0152" o "152"), intentamos buscar por ID también
             const numSearch = parseInt(search.replace(/\D/g, ''));
             if (!isNaN(numSearch)) {
                 orConditions.push({ id: numSearch });
@@ -224,7 +257,7 @@ export const listarVentas = async (req, res) => {
                     lteDate.setDate(lteDate.getDate() - 1);
                     break;
                 case 'Esta Semana':
-                    const diaSemana = gteDate.getDay() || 7; // Lunes como primer día
+                    const diaSemana = gteDate.getDay() || 7; 
                     gteDate.setDate(gteDate.getDate() - diaSemana + 1);
                     break;
                 case 'Este Mes':
@@ -243,7 +276,6 @@ export const listarVentas = async (req, res) => {
                     if (fecha_inicio) gteDate = new Date(`${fecha_inicio}T00:00:00.000Z`);
                     if (fecha_fin) lteDate = new Date(`${fecha_fin}T23:59:59.999Z`);
                     break;
-                // 'Hoy' usa los valores por defecto
             }
 
             if (gteDate || lteDate) {
@@ -257,10 +289,8 @@ export const listarVentas = async (req, res) => {
         const mesInicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
 
         const [totalRecords, ventasPaginadas, aggregateFiltrado, ventasDelMes] = await Promise.all([
-            // Contar cuántas ventas cumplen los filtros (para paginación)
             prisma.venta.count({ where: whereClause }),
             
-            // Traer los datos exactos para la tabla (ya filtrados)
             prisma.venta.findMany({
                 where: whereClause,
                 skip: skip,
@@ -273,20 +303,18 @@ export const listarVentas = async (req, res) => {
                 }
             }),
 
-            // Sumar el Total de TODO lo filtrado 
             prisma.venta.aggregate({
                 where: whereClause,
                 _sum: { total: true }
             }),
 
-            // Traer TODO el mes sin filtros 
             prisma.venta.findMany({
                 where: { isDeleted: false, status: 'exitosa', fechaVenta: { gte: mesInicio } },
                 include: { detalles: { select: { cantidad: true } } }
             })
         ]);
 
-        // CÁLCULO DE KPIs SUPERIORES Y BARRA INFERIOR
+        // CÁLCULO DE KPIs
         const hoyInicio = new Date(); hoyInicio.setHours(0, 0, 0, 0);
         const ayerInicio = new Date(hoyInicio); ayerInicio.setDate(ayerInicio.getDate() - 1);
         const ayerFin = new Date(ayerInicio); ayerFin.setHours(23, 59, 59, 999);
@@ -317,7 +345,6 @@ export const listarVentas = async (req, res) => {
             ventas_mes: { total: ventasMesTotal, meta_alcanzada: 20 }
         };
 
-        // Datos para la BARRA DE RESUMEN INFERIOR
         let formatoFechaRango = "Todo el histórico";
         if (gteDate && lteDate) {
             formatoFechaRango = `${gteDate.toISOString().split('T')[0]} a ${lteDate.toISOString().split('T')[0]}`;
@@ -331,7 +358,6 @@ export const listarVentas = async (req, res) => {
             ventas_count: totalRecords
         };
 
-        // FORMATEO DE LA TABLA
         const dataFormateada = ventasPaginadas.map(venta => {
             let resumenProductos = 'Sin productos';
             if (venta.detalles.length > 0) {
@@ -366,8 +392,6 @@ export const listarVentas = async (req, res) => {
     }
 };
 
-
-
 // OBTENER DETALLE DE UNA VENTA 
 export const obtenerVenta = async (req, res) => {
     try {
@@ -377,7 +401,6 @@ export const obtenerVenta = async (req, res) => {
             return res.status(400).json({ error: "ID de venta inválido." });
         }
 
-        // Buscar la venta con todos sus detalles, pagos y la info del socio
         const venta = await prisma.venta.findUnique({
             where: { id: parseInt(id) },
             include: {
@@ -386,7 +409,7 @@ export const obtenerVenta = async (req, res) => {
                 },
                 detalles: true,
                 pagos: {
-                    include: { metodoPago: true } // Para sacar si fue Efectivo, Tarjeta, etc.
+                    include: { metodoPago: true } 
                 }
             }
         });
@@ -395,13 +418,9 @@ export const obtenerVenta = async (req, res) => {
             return res.status(404).json({ error: "Venta no encontrada o eliminada." });
         }
 
-        // Extraer el método de pago (asumimos el primero, ya que suele ser un solo pago)
         const metodoPago = venta.pagos.length > 0 ? venta.pagos[0].metodoPago.nombre : 'No registrado';
-
-        // Calcular la cantidad total de artículos para el encabezado "PRODUCTOS"
         const cantidadTotalArticulos = venta.detalles.reduce((acc, det) => acc + det.cantidad, 0);
 
-        // Mapear la lista de productos
         const productosFormateados = venta.detalles.map(detalle => ({
             id_detalle: detalle.id,
             nombre: detalle.nombreProducto,
@@ -410,10 +429,9 @@ export const obtenerVenta = async (req, res) => {
             subtotal: parseFloat(detalle.subtotalLinea)
         }));
 
-        // Formatear la respuesta lista para inyectar en el Modal
         const dataFormateada = {
             id_venta: venta.id,
-            id_venta_str: `V-${venta.id.toString().padStart(4, '0')}`, // Ej: V-0152
+            id_venta_str: `V-${venta.id.toString().padStart(4, '0')}`, 
             cliente: venta.socio ? venta.socio.nombreCompleto : 'Público General',
             fecha_hora: venta.fechaVenta,
             metodo_pago: metodoPago,
