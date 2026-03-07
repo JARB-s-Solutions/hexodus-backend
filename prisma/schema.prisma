@@ -136,6 +136,8 @@ model Usuario {
   accesosValidados     Acceso[]             @relation("UsuarioAcceso")
   eliminacionesLogs    EliminacionLog[]     @relation("UsuarioEliminacion")
   movimientosCaja      CajaMovimiento[]     @relation("UsuarioCajaMov")
+  
+  reportesFinancieros  ReporteFinanciero[]  @relation("UsuarioReporte")
 
   @@map("usuarios")
 }
@@ -572,6 +574,28 @@ model AuditoriaLog {
 
   @@map("auditoria_log")
 }
+
+model ReporteFinanciero {
+  id              Int      @id @default(autoincrement()) @map("reporte_id")
+  nombre          String   @db.VarChar(120)
+  descripcion     String?  @db.VarChar(255)
+  tipo            String   @db.VarChar(60) 
+  formato         String   @db.VarChar(20) 
+  fechaInicio     DateTime @map("fecha_inicio")
+  fechaFin        DateTime @map("fecha_fin")
+  incluirGraficos Boolean  @default(false) @map("incluir_graficos")
+  incluirDetalles Boolean  @default(false) @map("incluir_detalles")
+  estado          String   @default("Exitoso") @db.VarChar(40) 
+  archivoUrl      String?  @map("archivo_url") @db.VarChar(255)
+  generadoEn      DateTime @default(now()) @map("generado_en")
+  
+  // Relación con Usuario
+  usuarioId       Int      @map("usuario_id")
+  usuario         Usuario  @relation("UsuarioReporte", fields: [usuarioId], references: [id])
+
+  @@map("reportes_financieros")
+}
+
 
 model EliminacionLog {
   id             Int       @id @default(autoincrement()) @map("eliminacion_id")
