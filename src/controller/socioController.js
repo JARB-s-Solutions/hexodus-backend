@@ -483,6 +483,7 @@ export const actualizarSocio = async (req, res) => {
                 }
 
                 const registrarCobro = async (membresiaId, monto, nota) => {
+                    if (monto <= 0) return; // 🔥 ESCUDO: No registrar cobros de $0
                     if (!cajaAbierta) throw new Error("CAJA_CERRADA");
                     
                     await tx.pagoMembresia.create({
@@ -506,15 +507,33 @@ export const actualizarSocio = async (req, res) => {
                 };
 
                 const registrarReverso = async (membresiaId, monto, nota) => {
+                    if (monto <= 0) return; // No registrar reversos de $0
                     if (!cajaAbierta) throw new Error("CAJA_CERRADA");
 
+                    // TRAZABILIDAD: Crear el espejo negativo en los pagos de la membresía
+                    await tx.pagoMembresia.create({
+                        data: {
+                            membresiaSocioId: membresiaId,
+                            metodoPagoId: membresia.metodo_pago_id || 1, 
+                            monto: -Math.abs(monto), // Forzamos el monto a negativo
+                            recibidoPor: req.user.id
+                        }
+                    });
+
+                    // CAJA: Registrar la salida física del dinero
                     let conceptoDevolucion = await tx.concepto.findFirst({ where: { nombre: 'Devolución de Membresía' } });
                     if (!conceptoDevolucion) conceptoDevolucion = await tx.concepto.create({ data: { nombre: 'Devolución de Membresía', tipo: 'gasto' } });
 
                     await tx.cajaMovimiento.create({
                         data: {
-                            corteId: cajaAbierta.id, usuarioId: req.user.id, conceptoId: conceptoDevolucion.id,
-                            tipo: 'gasto', monto: monto, referenciaTipo: 'membresia', referenciaId: membresiaId, nota: nota
+                            corteId: cajaAbierta.id, 
+                            usuarioId: req.user.id, 
+                            conceptoId: conceptoDevolucion.id,
+                            tipo: 'gasto', 
+                            monto: Math.abs(monto), 
+                            referenciaTipo: 'membresia', 
+                            referenciaId: membresiaId, 
+                            nota: nota
                         }
                     });
                 };
@@ -556,19 +575,22 @@ export const actualizarSocio = async (req, res) => {
                         await tx.membresiaSocio.update({
                             where: { id: membresiaActual.id },
                             data: {
-                                fechaInicio: new Date(membresia.fecha_inicio),
-                                fechaFin: new Date(membresia.fecha_vencimiento),
+                                fechaInicio: fechaInicioReal, // Ya usa el auto-cálculo
+                                fechaFin: fechaFinReal,       // Ya usa el auto-cálculo
                                 estadoPago: estadoPagoUI
                             }
                         });
 
+                        // Respaldamos el monto: Si el precio anterior era 0 (error de datos viejos), usamos el precio del plan actual.
+                        const montoOperacion = precioAnterior > 0 ? precioAnterior : precioFinal;
+
                         // Si debía el plan y ahora lo pagan
                         if (estadoAnterior === 'sin_pagar' && estadoPagoUI === 'pagado') {
-                            await registrarCobro(membresiaActual.id, precioAnterior, `Pago atrasado de membresía. Socio: ${socioExistente.codigoSocio}`);
+                            await registrarCobro(membresiaActual.id, montoOperacion, `Pago atrasado de membresía. Socio: ${socioExistente.codigoSocio}`);
                         } 
                         // Si estaba pagado y se equivocaron (lo regresan a sin pagar)
                         else if (estadoAnterior === 'pagado' && estadoPagoUI === 'sin_pagar') {
-                            await registrarReverso(membresiaActual.id, precioAnterior, `Corrección: Membresía a 'Sin Pagar'. Socio: ${socioExistente.codigoSocio}`);
+                            await registrarReverso(membresiaActual.id, montoOperacion, `Corrección: Membresía a 'Sin Pagar'. Socio: ${socioExistente.codigoSocio}`);
                         }
                     }
                 } else {
@@ -576,7 +598,7 @@ export const actualizarSocio = async (req, res) => {
                     const nuevaMembresia = await tx.membresiaSocio.create({
                         data: {
                             uuidMembresiaSocio: crypto.randomUUID(), socioId: socioId, planId: nuevoPlanId,
-                            fechaInicio: new Date(membresia.fecha_inicio), fechaFin: new Date(membresia.fecha_vencimiento),
+                            fechaInicio: fechaInicioReal, fechaFin: fechaFinReal, // Ya usa el auto-cálculo
                             status: 'activa', estadoPago: estadoPagoUI, precioCongelado: precioFinal, asignadoPor: req.user.id
                         }
                     });
