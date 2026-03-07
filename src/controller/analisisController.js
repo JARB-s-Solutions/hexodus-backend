@@ -166,14 +166,50 @@ export const obtenerAnalisisVentas = async (req, res) => {
             variacion_porcentaje: Number(pctVariacion.toFixed(1))
         };
 
-        // Bloque 2: Tendencia de Ventas (Para el Gráfico de Líneas)
+        // Bloque 2: Tendencia de Ventas (Relleno de Serie Temporal para gráficas continuas)
         const tendenciaMap = new Map();
+        
+        // Determinar si agrupamos por Mes (para periodos anuales) o por Día
+        const agruparPorMes = ['Este Año', 'Año Pasado'].includes(periodo);
+
+        // 1. Crear el calendario vacío (Padding) desde el inicio hasta el fin del periodo
+        let fechaIterador = new Date(gteActual);
+        const fechaLimite = new Date(lteActual);
+
+        if (agruparPorMes) {
+            // Rellena los 12 meses
+            while (fechaIterador <= fechaLimite) {
+                const mesStr = fechaIterador.toISOString().slice(0, 7); // Ej: "2026-01"
+                tendenciaMap.set(mesStr, 0);
+                fechaIterador.setMonth(fechaIterador.getMonth() + 1);
+            }
+        } else {
+            // Rellena día por día
+            while (fechaIterador <= fechaLimite) {
+                const diaStr = fechaIterador.toISOString().split('T')[0]; // Ej: "2026-03-01"
+                tendenciaMap.set(diaStr, 0);
+                fechaIterador.setDate(fechaIterador.getDate() + 1);
+            }
+        }
+
+        // 2. Inyectar las ventas reales en el calendario
         ventasActuales.forEach(v => {
-            const fechaStr = v.fechaVenta.toISOString().split('T')[0]; // Ej: "2026-03-01"
-            tendenciaMap.set(fechaStr, (tendenciaMap.get(fechaStr) || 0) + parseFloat(v.total));
+            let claveFecha = "";
+            if (agruparPorMes) {
+                claveFecha = v.fechaVenta.toISOString().slice(0, 7); 
+            } else {
+                claveFecha = v.fechaVenta.toISOString().split('T')[0];
+            }
+            
+            // Si la fecha existe en el mapa, le sumamos la venta; si no, la creamos (por seguridad de zona horaria)
+            if (tendenciaMap.has(claveFecha)) {
+                tendenciaMap.set(claveFecha, tendenciaMap.get(claveFecha) + parseFloat(v.total));
+            } else {
+                tendenciaMap.set(claveFecha, parseFloat(v.total));
+            }
         });
         
-        // Convertimos el Map a un array ordenado para el Frontend
+        // 3. Convertir el mapa a un arreglo ordenado que el Frontend pueda graficar
         const tendencia_ventas = Array.from(tendenciaMap, ([fecha, total]) => ({ fecha, total }))
                                       .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
