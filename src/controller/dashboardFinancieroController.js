@@ -188,7 +188,7 @@ export const obtenerResumenFinanciero = async (req, res) => {
         const rendimiento_planes = Array.from(planesMap, ([plan, cantidad]) => ({ plan, cantidad }))
                                         .sort((a, b) => b.cantidad - a.cantidad);
 
-        // SECCIÓN 5: INSIGHTS INTELIGENTES 🔥
+        // SECCIÓN 5: INSIGHTS INTELIGENTES 
         const insights = [];
 
         // 1. Salud Financiera
@@ -216,6 +216,17 @@ export const obtenerResumenFinanciero = async (req, res) => {
             insights.push({ tipo: 'neutral', texto: `Tu plan más popular fue '${rendimiento_planes[0].plan}' con ${rendimiento_planes[0].cantidad} ventas nuevas.` });
         }
 
+        // SECCIÓN 6: BARRA INFERIOR DE RESUMEN
+        // Formateamos las fechas de ISO a YYYY-MM-DD para la vista "2026-02-01 a 2026-02-21"
+        const formatoFechaRango = `${gteActual.toISOString().split('T')[0]} a ${lteActual.toISOString().split('T')[0]}`;
+        
+        const barra_inferior = {
+            periodo_texto: periodo || 'Este Mes',
+            rango_fechas: formatoFechaRango,
+            ingresos_totales: totIngresos,
+            utilidad_neta: totUtilidad
+        };
+
         // E. RESPUESTA FINAL
         res.status(200).json({
             message: "Reporte Financiero generado",
@@ -226,7 +237,8 @@ export const obtenerResumenFinanciero = async (req, res) => {
                 tarjetas_detalle,
                 top_gastos,         
                 rendimiento_planes, 
-                insights            
+                insights,
+                barra_inferior            
             }
         });
 
