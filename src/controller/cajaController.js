@@ -14,21 +14,24 @@ export const abrirCaja = async (req, res) => {
             return res.status(400).json({ error: "Ya existe un turno de caja abierto. Debes cerrarlo primero." });
         }
 
-        // Verificar que el concepto base exista ANTES de mover nada
-        const conceptoApertura = await prisma.concepto.findFirst({
-            where: { nombre: { equals: 'Apertura / Fondo de Caja', mode: 'insensitive' } }
-        });
-
-        if (!conceptoApertura) {
-            return res.status(400).json({ 
-                error: "El concepto 'Apertura / Fondo de Caja' no existe en el catálogo. Pídele al administrador que lo cree antes de intentar abrir la caja." 
-            });
-        }
-
-        // Transacción para crear el Corte y el Movimiento inicial
+        // Transacción para crear el Corte y el Movimiento inicial automáticamente
         const resultado = await prisma.$transaction(async (tx) => {
             
-            // Crear la sesión de caja
+            // 1. Buscar o crear el concepto de Apertura automáticamente
+            let conceptoApertura = await tx.concepto.findFirst({
+                where: { nombre: { equals: 'Apertura / Fondo de Caja', mode: 'insensitive' } }
+            });
+
+            if (!conceptoApertura) {
+                conceptoApertura = await tx.concepto.create({
+                    data: {
+                        nombre: 'Apertura / Fondo de Caja',
+                        tipo: 'ingreso' // Es un ingreso de efectivo para la base de la caja
+                    }
+                });
+            }
+            
+            // 2. Crear la sesión de caja
             const nuevoCorte = await tx.corteCaja.create({
                 data: {
                     usuarioId: req.user.id,
@@ -39,13 +42,13 @@ export const abrirCaja = async (req, res) => {
                 }
             });
 
-            // Registrar el ingreso del "Fondo de Caja" (Si declararon dinero)
+            // 3. Registrar el ingreso del "Fondo de Caja" (Si declararon dinero)
             if (monto_inicial && parseFloat(monto_inicial) > 0) {
                 await tx.cajaMovimiento.create({
                     data: {
                         corteId: nuevoCorte.id,
                         usuarioId: req.user.id,
-                        conceptoId: conceptoApertura.id, // Usamos el ID del concepto que ya confirmamos que existe
+                        conceptoId: conceptoApertura.id,
                         tipo: 'ingreso',
                         monto: parseFloat(monto_inicial),
                         referenciaTipo: 'otro',
