@@ -116,13 +116,13 @@ export const crearSocio = async (req, res) => {
                 const esOfertaActiva = plan.esOferta && plan.fechaFinOferta && new Date(plan.fechaFinOferta) >= hoy;
                 const precioFinal = esOfertaActiva ? plan.precioOferta : plan.precioBase;
 
-                // ¿El cajero decidió cobrar o dejar pendiente?
-                const estadoPagoUI = membresia.estado_pago || 'pagado'; // 'pagado' o 'sin_pagar'
-
+                const estadoPagoUI = membresia.estado_pago || 'pagado'; 
+                
+                let cajaAbierta = null;
                 if (estadoPagoUI === 'pagado') {
-                    const cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
+                    cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
                     if (!cajaAbierta) {
-                        throw new Error("CAJA_CERRADA"); // Detiene la transacción
+                        throw new Error("CAJA_CERRADA"); 
                     }
                 }
 
@@ -134,13 +134,12 @@ export const crearSocio = async (req, res) => {
                         fechaInicio: fechaInicio,
                         fechaFin: fechaFin,
                         status: 'activa',
-                        estadoPago: estadoPagoUI, // Se guarda como pagado o pendiente
+                        estadoPago: estadoPagoUI,
                         precioCongelado: precioFinal,
                         asignadoPor: req.user.id
                     }
                 });
 
-                // Si se marcó como "pagado", hacemos la entrada de dinero
                 if (estadoPagoUI === 'pagado') {
                     await tx.pagoMembresia.create({
                         data: {
@@ -158,6 +157,7 @@ export const crearSocio = async (req, res) => {
 
                     await tx.cajaMovimiento.create({
                         data: {
+                            corteId: cajaAbierta.id, // Atado al turno actual
                             usuarioId: req.user.id,
                             conceptoId: conceptoMembresia.id,
                             tipo: 'ingreso',
@@ -184,11 +184,9 @@ export const crearSocio = async (req, res) => {
     } catch (error) {
         console.error("Error al crear socio:", error);
         
-        // Atrapamos el error de la caja
         if (error.message === "CAJA_CERRADA") {
             return res.status(403).json({ error: "Operación denegada: No puedes registrar un pago porque la caja está cerrada." });
         }
-
         if (error.message === "El plan de membresía seleccionado no existe.") {
             return res.status(400).json({ error: error.message });
         }
@@ -197,7 +195,7 @@ export const crearSocio = async (req, res) => {
 };
 
 
-// LISTAR TODOS LOS SOCIOS (Con KPIs Globales y Optimizado para Tabla)
+// LISTAR TODOS LOS SOCIOS 
 export const listarSocios = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -206,10 +204,7 @@ export const listarSocios = async (req, res) => {
 
         const { search, estado } = req.query;
 
-        // Filtros para la tabla
-        let whereClause = {
-            isDeleted: false
-        };
+        let whereClause = { isDeleted: false };
 
         if (search) {
             whereClause.OR = [
@@ -223,19 +218,15 @@ export const listarSocios = async (req, res) => {
             whereClause.status = estado;
         }
 
-        // Tiempos exactos para cálculos de vigencia
         const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0); // Inicio de hoy
-        
+        hoy.setHours(0, 0, 0, 0); 
         const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-        
         const limite7Dias = new Date(hoy);
         limite7Dias.setDate(hoy.getDate() + 7);
         limite7Dias.setHours(23, 59, 59, 999);
 
-        // Ejecución Paralela: Buscamos totales, tabla y datos globales para las tarjetas
         const [totalRecords, sociosRaw, sociosGlobalesStats] = await Promise.all([
-            prisma.socio.count({ where: whereClause }), // Para paginación
+            prisma.socio.count({ where: whereClause }),
             prisma.socio.findMany({ 
                 where: whereClause,
                 skip: skip,
@@ -253,7 +244,7 @@ export const listarSocios = async (req, res) => {
                     }
                 }
             }),
-            prisma.socio.findMany({ // Consulta ultra ligera de TODOS los socios para las estadísticas
+            prisma.socio.findMany({ 
                 where: { isDeleted: false },
                 select: {
                     createdAt: true,
@@ -266,58 +257,34 @@ export const listarSocios = async (req, res) => {
             })
         ]);
 
-        // --- CÁLCULO DE LAS 4 TARJETAS DEL DASHBOARD ---
         let totalSocios = sociosGlobalesStats.length;
-        let nuevosEsteMes = 0;
-        let activos = 0;
-        let vencidos = 0;
-        let vencenEn7Dias = 0;
+        let nuevosEsteMes = 0, activos = 0, vencidos = 0, vencenEn7Dias = 0;
 
         sociosGlobalesStats.forEach(socio => {
-            // Tarjeta 1: Nuevos este mes
             if (socio.createdAt >= inicioMes) nuevosEsteMes++;
 
             if (socio.membresias.length > 0) {
                 const fechaFin = new Date(socio.membresias[0].fechaFin);
-
                 if (fechaFin >= hoy) {
-                    // Tarjeta 2: Activos
                     activos++;
-                    // Tarjeta 4: Vencen en 7 días
                     if (fechaFin <= limite7Dias) vencenEn7Dias++;
                 } else {
-                    // Tarjeta 3: Vencidos
                     vencidos++;
                 }
             } else {
-                // Si nunca compró membresía, cuenta como inactivo/vencido
                 vencidos++;
             }
         });
 
-        // Calcular porcentaje para Tarjeta 2
         const porcentajeActivos = totalSocios > 0 ? Math.round((activos / totalSocios) * 100) : 0;
 
         const dashboard_stats = {
-            total_socios: {
-                valor: totalSocios,
-                etiqueta: `+${nuevosEsteMes} este mes`
-            },
-            socios_activos: {
-                valor: activos,
-                etiqueta: `${porcentajeActivos}% del total`
-            },
-            vencidos: {
-                valor: vencidos,
-                etiqueta: "Requieren seguimiento"
-            },
-            vencen_en_7_dias: {
-                valor: vencenEn7Dias,
-                etiqueta: "Renovación pendiente"
-            }
+            total_socios: { valor: totalSocios, etiqueta: `+${nuevosEsteMes} este mes` },
+            socios_activos: { valor: activos, etiqueta: `${porcentajeActivos}% del total` },
+            vencidos: { valor: vencidos, etiqueta: "Requieren seguimiento" },
+            vencen_en_7_dias: { valor: vencenEn7Dias, etiqueta: "Renovación pendiente" }
         };
 
-        // --- FORMATEO DE LA TABLA ---
         const dataFormateada = sociosRaw.map(socio => {
             const membresiaActual = socio.membresias[0];
             const contratoActual = socio.contratos[0];
@@ -327,13 +294,9 @@ export const listarSocios = async (req, res) => {
                 clave: socio.codigoSocio,
                 nombre: socio.nombreCompleto,
                 genero: socio.genero || 'N/A',
-                contacto: {
-                    telefono: socio.telefono,
-                    correo: socio.correo
-                },
+                contacto: { telefono: socio.telefono, correo: socio.correo },
                 membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin membresía',
                 vencimiento: membresiaActual ? membresiaActual.fechaFin : null,
-                // Validamos en tiempo real si sigue activa hoy
                 vigencia: membresiaActual ? (new Date(membresiaActual.fechaFin) >= hoy ? 'Activa' : 'Vencida') : 'N/A',
                 estado_contrato: contratoActual ? (contratoActual.status === 'vigente') : false
             };
@@ -343,12 +306,7 @@ export const listarSocios = async (req, res) => {
             message: "Lista de socios obtenida correctamente",
             dashboard_stats: dashboard_stats, 
             data: dataFormateada,            
-            pagination: {
-                current_page: page,
-                limit: limit,
-                total_records: totalRecords,
-                total_pages: Math.ceil(totalRecords / limit)
-            }
+            pagination: { current_page: page, limit: limit, total_records: totalRecords, total_pages: Math.ceil(totalRecords / limit) }
         });
 
     } catch (error) {
@@ -357,7 +315,7 @@ export const listarSocios = async (req, res) => {
     }
 };
 
-// OBTENER UN SOCIO EN ESPECÍFICO (Actualizado con Fechas y Código)
+// OBTENER UN SOCIO EN ESPECÍFICO
 export const obtenerSocio = async (req, res) => {
     try {
         const { id } = req.params;
@@ -369,15 +327,8 @@ export const obtenerSocio = async (req, res) => {
         const socio = await prisma.socio.findUnique({
             where: { id: parseInt(id) },
             include: {
-                membresias: {
-                    include: { plan: true },
-                    orderBy: { fechaFin: 'desc' },
-                    take: 1
-                },
-                contratos: {
-                    orderBy: { fechaFin: 'desc' },
-                    take: 1
-                }
+                membresias: { include: { plan: true }, orderBy: { fechaFin: 'desc' }, take: 1 },
+                contratos: { orderBy: { fechaFin: 'desc' }, take: 1 }
             }
         });
 
@@ -389,46 +340,30 @@ export const obtenerSocio = async (req, res) => {
         const contratoActual = socio.contratos[0];
         const tieneContrato = !!contratoActual;
 
-        // Validar vigencia real al día de hoy
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
 
-        // Formatear la respuesta
         const dataFormateada = {
-            // Header
             codigo_socio: socio.codigoSocio,
             nombre_completo: socio.nombreCompleto,
             correo: socio.correo || 'Sin correo registrado',
             foto_perfil_url: socio.fotoUrl, 
-            
-            // Info Personal
             genero: socio.genero || 'N/A',
             telefono: socio.telefono || 'Sin teléfono',
-            
-            // Info Membresía
             membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin membresía',
             vigencia_membresia: membresiaActual ? (new Date(membresiaActual.fechaFin) >= hoy ? 'Vigente' : 'Vencida') : 'N/A',
             fecha_inicio_membresia: membresiaActual ? membresiaActual.fechaInicio : null, 
             fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null,      
-            
-            // Info Contrato
             firmo_contrato: tieneContrato ? true : false,
             estado_contrato: contratoActual ? contratoActual.status : 'N/A',
             fecha_inicio_contrato: contratoActual ? contratoActual.fechaInicio : null, 
             fecha_fin_contrato: contratoActual ? contratoActual.fechaFin : null,       
-            
-            // Biométricos
             biometrico_rostro: socio.faceEncoding ? true : false,
             biometrico_huella: socio.huellaTemplate ? true : false,
-            
-            // Footer
             fecha_registro: socio.createdAt
         };
 
-        res.status(200).json({
-            message: "Datos del socio obtenidos correctamente",
-            data: dataFormateada
-        });
+        res.status(200).json({ message: "Datos del socio obtenidos correctamente", data: dataFormateada });
 
     } catch (error) {
         console.error("Error al obtener socio:", error);
@@ -436,39 +371,24 @@ export const obtenerSocio = async (req, res) => {
     }
 };
 
-
-
-// ACTUALIZAR SOCIO (PUT)
+// ACTUALIZAR SOCIO (PUT) - CON CONTABILIDAD DE DOBLE PARTIDA ⚖️
 export const actualizarSocio = async (req, res) => {
     try {
         const { id } = req.params;
         const { personal, biometria, detalles_contrato, membresia } = req.body;
 
-        if (isNaN(id)) {
-            return res.status(400).json({ error: "ID de socio inválido." });
-        }
-
+        if (isNaN(id)) return res.status(400).json({ error: "ID de socio inválido." });
         const socioId = parseInt(id);
 
-        // Verificar si el socio existe
-        const socioExistente = await prisma.socio.findUnique({
-            where: { id: socioId }
-        });
+        const socioExistente = await prisma.socio.findUnique({ where: { id: socioId } });
+        if (!socioExistente || socioExistente.isDeleted) return res.status(404).json({ error: "Socio no encontrado." });
 
-        if (!socioExistente || socioExistente.isDeleted) {
-            return res.status(404).json({ error: "Socio no encontrado." });
-        }
-
-        // Transacción Maestra para actualizar todas las tablas
         await prisma.$transaction(async (tx) => {
             
             // ACTUALIZAR DATOS PERSONALES Y BIOMETRÍA
             let dataSocio = {};
-            
             if (personal) {
-                if (personal.nombre_completo) {
-                    dataSocio.nombreCompleto = personal.nombre_completo.trim();
-                }
+                if (personal.nombre_completo) dataSocio.nombreCompleto = personal.nombre_completo.trim();
                 if (personal.correo_electronico !== undefined) dataSocio.correo = personal.correo_electronico;
                 if (personal.numero_telefono !== undefined) dataSocio.telefono = personal.numero_telefono;
                 if (personal.genero !== undefined) dataSocio.genero = personal.genero;
@@ -486,25 +406,18 @@ export const actualizarSocio = async (req, res) => {
                 }
             }
 
-            // Solo hacemos el update si hay campos que cambiar
             if (Object.keys(dataSocio).length > 0) {
-                await tx.socio.update({
-                    where: { id: socioId },
-                    data: dataSocio
-                });
+                await tx.socio.update({ where: { id: socioId }, data: dataSocio });
             }
 
-            // --- CONTRATO ---
+            // ACTUALIZAR CONTRATO
             if (detalles_contrato) {
-                // Buscamos su contrato más reciente
                 const contratoActual = await tx.socioContrato.findFirst({
-                    where: { socioId: socioId },
-                    orderBy: { id: 'desc' }
+                    where: { socioId: socioId }, orderBy: { id: 'desc' }
                 });
 
                 if (detalles_contrato.contrato_firmado) {
                     if (contratoActual) {
-                        // Actualizar fechas del existente
                         await tx.socioContrato.update({
                             where: { id: contratoActual.id },
                             data: {
@@ -514,7 +427,6 @@ export const actualizarSocio = async (req, res) => {
                             }
                         });
                     } else {
-                        // Si no tenía contrato y lo acaban de encender en el UI
                         await tx.socioContrato.create({
                             data: {
                                 uuidSocioContrato: crypto.randomUUID(),
@@ -527,64 +439,150 @@ export const actualizarSocio = async (req, res) => {
                         });
                     }
                 } else if (contratoActual && !detalles_contrato.contrato_firmado) {
-                    // REGLA DE NEGOCIO: Proteger el contrato activo
-                    const hoy = new Date();
-                    hoy.setHours(0, 0, 0, 0); // Normalizamos al inicio del día
-                    
-                    const fechaFinContrato = new Date(contratoActual.fechaFin);
-                    fechaFinContrato.setHours(0, 0, 0, 0);
+                    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+                    const fechaFinContrato = new Date(contratoActual.fechaFin); fechaFinContrato.setHours(0, 0, 0, 0);
 
-                    // Si el contrato está vigente y su fecha final es mayor o igual a hoy, NO PERMITIR CANCELAR
                     if (contratoActual.status === 'vigente' && fechaFinContrato >= hoy) {
-                        throw new Error("REGLA_CONTRATO_VIGENTE"); // Disparamos un error que capturaremos abajo
+                        throw new Error("REGLA_CONTRATO_VIGENTE"); 
                     } else {
-                        // Si ya está vencido, entonces sí permitimos apagarlo/cancelarlo
                         await tx.socioContrato.update({
-                            where: { id: contratoActual.id },
-                            data: { status: 'cancelado' }
+                            where: { id: contratoActual.id }, data: { status: 'cancelado' }
                         });
                     }
                 }
             }
 
-            // --- MEMBRESÍA ---
+            // ACTUALIZAR MEMBRESÍA CON LÓGICA CONTABLE (REVERSOS Y COBROS)
             if (membresia && membresia.plan_id) {
-                // Buscamos su membresía más reciente
+                const nuevoPlanId = parseInt(membresia.plan_id);
+                const estadoPagoUI = membresia.estado_pago || 'sin_pagar';
+
+                // Verificamos si hay una caja abierta por si necesitamos mover dinero
+                const cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
+
                 const membresiaActual = await tx.membresiaSocio.findFirst({
-                    where: { socioId: socioId },
-                    orderBy: { id: 'desc' }
+                    where: { socioId: socioId }, orderBy: { id: 'desc' }
                 });
 
-                if (membresiaActual) {
-                    // Si ya tenía membresía, solo actualizamos los datos
-                    await tx.membresiaSocio.update({
-                        where: { id: membresiaActual.id },
+                const planNuevo = await tx.membresiaPlan.findUnique({ where: { id: nuevoPlanId } });
+                if (!planNuevo) throw new Error("PLAN_NO_EXISTE");
+
+                const hoy = new Date();
+                const esOfertaActiva = planNuevo.esOferta && planNuevo.fechaFinOferta && new Date(planNuevo.fechaFinOferta) >= hoy;
+                const precioFinal = esOfertaActiva ? parseFloat(planNuevo.precioOferta) : parseFloat(planNuevo.precioBase);
+
+                // --- AUTO-CÁLCULO DE FECHAS ---
+                const fechaInicioReal = new Date(membresia.fecha_inicio);
+                let fechaFinReal;
+
+                if (membresia.fecha_vencimiento) {
+                    fechaFinReal = new Date(membresia.fecha_vencimiento);
+                } else {
+                    fechaFinReal = new Date(fechaInicioReal);
+                    fechaFinReal.setDate(fechaFinReal.getDate() + planNuevo.duracionDias);
+                }
+
+                const registrarCobro = async (membresiaId, monto, nota) => {
+                    if (!cajaAbierta) throw new Error("CAJA_CERRADA");
+                    
+                    await tx.pagoMembresia.create({
                         data: {
-                            planId: parseInt(membresia.plan_id),
-                            fechaInicio: new Date(membresia.fecha_inicio),
-                            fechaFin: new Date(membresia.fecha_vencimiento)
+                            membresiaSocioId: membresiaId,
+                            metodoPagoId: membresia.metodo_pago_id || 1,
+                            monto: monto,
+                            recibidoPor: req.user.id
                         }
                     });
-                } else {
-                    // Si no tenía membresía, se la creamos desde aquí
-                    const plan = await tx.membresiaPlan.findUnique({
-                        where: { id: parseInt(membresia.plan_id) }
-                    });
 
-                    if (plan) {
-                        await tx.membresiaSocio.create({
+                    let conceptoMembresia = await tx.concepto.findFirst({ where: { nombre: 'Inscripción / Membresía' } });
+                    if (!conceptoMembresia) conceptoMembresia = await tx.concepto.create({ data: { nombre: 'Inscripción / Membresía', tipo: 'ingreso' } });
+
+                    await tx.cajaMovimiento.create({
+                        data: {
+                            corteId: cajaAbierta.id, usuarioId: req.user.id, conceptoId: conceptoMembresia.id,
+                            tipo: 'ingreso', monto: monto, referenciaTipo: 'membresia', referenciaId: membresiaId, nota: nota
+                        }
+                    });
+                };
+
+                const registrarReverso = async (membresiaId, monto, nota) => {
+                    if (!cajaAbierta) throw new Error("CAJA_CERRADA");
+
+                    let conceptoDevolucion = await tx.concepto.findFirst({ where: { nombre: 'Devolución de Membresía' } });
+                    if (!conceptoDevolucion) conceptoDevolucion = await tx.concepto.create({ data: { nombre: 'Devolución de Membresía', tipo: 'gasto' } });
+
+                    await tx.cajaMovimiento.create({
+                        data: {
+                            corteId: cajaAbierta.id, usuarioId: req.user.id, conceptoId: conceptoDevolucion.id,
+                            tipo: 'gasto', monto: monto, referenciaTipo: 'membresia', referenciaId: membresiaId, nota: nota
+                        }
+                    });
+                };
+
+                if (membresiaActual) {
+                    const estadoAnterior = membresiaActual.estadoPago;
+                    const precioAnterior = parseFloat(membresiaActual.precioCongelado || 0);
+
+                    // CASO A: CAMBIO DE PLAN 
+                    if (membresiaActual.planId !== nuevoPlanId) {
+                        
+                        // 1. Si la anterior estaba pagada, DEVOLVEMOS el dinero contablemente
+                        if (estadoAnterior === 'pagado') {
+                            await registrarReverso(membresiaActual.id, precioAnterior, `Reverso por cambio de plan. Socio: ${socioExistente.codigoSocio}`);
+                        }
+
+                        // 2. Cancelamos la vieja
+                        await tx.membresiaSocio.update({
+                            where: { id: membresiaActual.id },
+                            data: { status: 'cancelada' }
+                        });
+
+                        // 3. Creamos la nueva
+                        const nuevaMembresia = await tx.membresiaSocio.create({
                             data: {
-                                uuidMembresiaSocio: crypto.randomUUID(),
-                                socioId: socioId,
-                                planId: plan.id,
-                                fechaInicio: new Date(membresia.fecha_inicio),
-                                fechaFin: new Date(membresia.fecha_vencimiento),
-                                status: 'activa',
-                                estadoPago: membresia.estado_pago || 'sin_pagar',
-                                precioCongelado: plan.precioBase,
-                                asignadoPor: req.user.id
+                                uuidMembresiaSocio: crypto.randomUUID(), socioId: socioId, planId: nuevoPlanId,
+                                fechaInicio: fechaInicioReal,fechaFin: fechaFinReal,
+                                status: 'activa', estadoPago: estadoPagoUI, precioCongelado: precioFinal, asignadoPor: req.user.id
                             }
                         });
+
+                        // 4. Cobramos la nueva (si el UI la mandó como pagada)
+                        if (estadoPagoUI === 'pagado') {
+                            await registrarCobro(nuevaMembresia.id, precioFinal, `Cobro de nuevo plan. Socio: ${socioExistente.codigoSocio}`);
+                        }
+                    } 
+                    // CASO B: MISMO PLAN, SOLO CAMBIARON FECHAS O ESTADO DE PAGO
+                    else {
+                        await tx.membresiaSocio.update({
+                            where: { id: membresiaActual.id },
+                            data: {
+                                fechaInicio: new Date(membresia.fecha_inicio),
+                                fechaFin: new Date(membresia.fecha_vencimiento),
+                                estadoPago: estadoPagoUI
+                            }
+                        });
+
+                        // Si debía el plan y ahora lo pagan
+                        if (estadoAnterior === 'sin_pagar' && estadoPagoUI === 'pagado') {
+                            await registrarCobro(membresiaActual.id, precioAnterior, `Pago atrasado de membresía. Socio: ${socioExistente.codigoSocio}`);
+                        } 
+                        // Si estaba pagado y se equivocaron (lo regresan a sin pagar)
+                        else if (estadoAnterior === 'pagado' && estadoPagoUI === 'sin_pagar') {
+                            await registrarReverso(membresiaActual.id, precioAnterior, `Corrección: Membresía a 'Sin Pagar'. Socio: ${socioExistente.codigoSocio}`);
+                        }
+                    }
+                } else {
+                    // CASO C: NO TENÍA MEMBRESÍA
+                    const nuevaMembresia = await tx.membresiaSocio.create({
+                        data: {
+                            uuidMembresiaSocio: crypto.randomUUID(), socioId: socioId, planId: nuevoPlanId,
+                            fechaInicio: new Date(membresia.fecha_inicio), fechaFin: new Date(membresia.fecha_vencimiento),
+                            status: 'activa', estadoPago: estadoPagoUI, precioCongelado: precioFinal, asignadoPor: req.user.id
+                        }
+                    });
+
+                    if (estadoPagoUI === 'pagado') {
+                        await registrarCobro(nuevaMembresia.id, precioFinal, `Suscripción de membresía asignada. Socio: ${socioExistente.codigoSocio}`);
                     }
                 }
             }
@@ -593,37 +591,31 @@ export const actualizarSocio = async (req, res) => {
             timeout: 20000 
         });
 
-        res.status(200).json({
-            message: "Perfil del socio actualizado correctamente."
-        });
+        res.status(200).json({ message: "Perfil del socio actualizado correctamente." });
 
     } catch (error) {
         console.error("Error al actualizar socio:", error);
         
-        // CAPTURAMOS NUESTRA REGLA DE NEGOCIO Y MANDAMOS EL MENSAJE 
+        if (error.message === "CAJA_CERRADA") {
+            return res.status(403).json({ error: "Operación denegada: La actualización requiere registrar un pago o devolución, pero la caja está cerrada." });
+        }
         if (error.message === "REGLA_CONTRATO_VIGENTE") {
-            return res.status(400).json({ 
-                error: "No se puede desactivar el contrato porque aún se encuentra vigente. Debe esperar a su fecha de vencimiento." 
-            });
+            return res.status(400).json({ error: "No se puede desactivar el contrato porque aún se encuentra vigente." });
         }
 
         res.status(500).json({ error: "Error interno al actualizar el perfil del socio." });
     }
 };
 
-
-// ELIMINAR SOCIO (Borrado Lógico / Soft Delete)
+// ELIMINAR SOCIO (Borrado Lógico)
 export const eliminarSocio = async (req, res) => {
     try {
         const { id } = req.params;
 
-        if (isNaN(id)) {
-            return res.status(400).json({ error: "ID de socio inválido." });
-        }
-
+        if (isNaN(id)) return res.status(400).json({ error: "ID de socio inválido." });
+        
         const socioId = parseInt(id);
 
-        // Verificar si existe y si no está ya eliminado
         const socioExistente = await prisma.socio.findUnique({
             where: { id: socioId },
             include: {
@@ -636,18 +628,12 @@ export const eliminarSocio = async (req, res) => {
             return res.status(404).json({ error: "Socio no encontrado o ya fue eliminado." });
         }
 
-        // Usamos una transacción para borrar al socio y cancelar sus servicios activos
         await prisma.$transaction(async (tx) => {
-            // Marcar al socio como eliminado e inactivo
             await tx.socio.update({
                 where: { id: socioId },
-                data: {
-                    isDeleted: true,
-                    status: 'inactivo' // Lo pasamos a inactivo por seguridad
-                }
+                data: { isDeleted: true, status: 'inactivo' }
             });
 
-            // Cancelar membresía activa (si tiene)
             if (socioExistente.membresias.length > 0) {
                 await tx.membresiaSocio.update({
                     where: { id: socioExistente.membresias[0].id },
@@ -655,7 +641,6 @@ export const eliminarSocio = async (req, res) => {
                 });
             }
 
-            // Cancelar contrato vigente (si tiene)
             if (socioExistente.contratos.length > 0) {
                 await tx.socioContrato.update({
                     where: { id: socioExistente.contratos[0].id },
@@ -664,9 +649,7 @@ export const eliminarSocio = async (req, res) => {
             }
         });
 
-        res.status(200).json({
-            message: "Socio eliminado correctamente del sistema."
-        });
+        res.status(200).json({ message: "Socio eliminado correctamente del sistema." });
 
     } catch (error) {
         console.error("Error al eliminar socio:", error);
