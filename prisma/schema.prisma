@@ -95,6 +95,13 @@ enum CategoriaEstado {
   inactiva
 }
 
+enum AccesoMetodo {
+  facial
+  huella
+  tarjeta
+  manual
+}
+
 // ==========================================================
 // 1 y 2. MÓDULO: USUARIOS Y ROLES
 // ==========================================================
@@ -716,17 +723,37 @@ model CajaMovimiento {
 // ==========================================================
 
 model Acceso {
-  id             Int       @id @default(autoincrement()) @map("acceso_id")
-  socioId        Int       @map("socio_id")
+  id             Int          @id @default(autoincrement()) @map("acceso_id")
+  socioId        Int          @map("socio_id")
   tipo           AccesoTipo
-  fechaHora      DateTime  @default(now()) @map("fecha_hora")
-  validado       Boolean   @default(true)
-  motivo         String?   @db.VarChar(255)
-  usuarioId      Int?      @map("usuario_id")
-  dispositivoId  String?   @map("dispositivo_id") @db.VarChar(60)
+  fechaHora      DateTime     @default(now()) @map("fecha_hora")
+  validado       Boolean      @default(true)
+  motivo         String?      @db.VarChar(255)
+  usuarioId      Int?         @map("usuario_id")
+  dispositivoId  String?      @map("dispositivo_id") @db.VarChar(60)
+  
+  // CAMPOS BIOMÉTRICOS
+  metodo         AccesoMetodo @default(facial)
+  confidence     Decimal?     @db.Decimal(5,2) // 0.00 a 100.00
+  matchDistance  Decimal?     @map("match_distance") @db.Decimal(5,3)
 
-  socio          Socio     @relation(fields: [socioId], references: [id])
-  validador      Usuario?  @relation("UsuarioAcceso", fields: [usuarioId], references: [id])
+  socio          Socio        @relation(fields: [socioId], references: [id])
+  validador      Usuario?     @relation("UsuarioAcceso", fields: [usuarioId], references: [id])
 
   @@map("accesos")
+}
+
+
+// MODELO DE SEGURIDAD
+model IntentoAccesoFallido {
+  id                  Int      @id @default(autoincrement()) @map("intento_id")
+  fechaHora           DateTime @default(now()) @map("fecha_hora")
+  faceDescriptor      Json?    @map("face_descriptor")
+  imagenCaptura       String?  @map("imagen_captura") @db.Text
+  matchDistanceMinimo Decimal? @map("match_distance_minimo") @db.Decimal(5,3)
+  dispositivoId       String?  @map("dispositivo_id") @db.VarChar(60)
+  ipAddress           String?  @map("ip_address") @db.VarChar(45)
+
+  @@index([fechaHora(sort: Desc)])
+  @@map("intentos_acceso_fallidos")
 }
