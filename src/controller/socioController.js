@@ -1,6 +1,32 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
 
+// AYUDANTES DE VALIDACIÓN GLOBALES
+const validarFecha = (fechaStr, nombreCampo) => {
+    if (!fechaStr) return null;
+    const fecha = new Date(fechaStr);
+    if (isNaN(fecha.getTime())) throw new Error(`UX_ERROR:La fecha proporcionada para '${nombreCampo}' es inválida.`);
+    
+    // Evitar fechas extremadamente raras por errores de tipeo del usuario (ej. año 0024 en vez de 2024)
+    const year = fecha.getFullYear();
+    if (year < 2000 || year > 2100) throw new Error(`UX_ERROR:La fecha para '${nombreCampo}' está fuera de un rango aceptable.`);
+    
+    return fecha;
+};
+
+const validarMetodoPago = async (tx, metodoId) => {
+    if (metodoId) {
+        const existe = await tx.metodoPago.findUnique({ where: { id: parseInt(metodoId) } });
+        if (!existe) throw new Error("NOT_FOUND:El método de pago especificado no existe en el catálogo.");
+        return existe.id;
+    }
+    // Fallback seguro: Si el frontend no manda nada, toma el primer método válido que exista en BD
+    const fallback = await tx.metodoPago.findFirst();
+    if (!fallback) throw new Error("UX_ERROR:No hay métodos de pago registrados en el sistema. Debe registrar al menos uno.");
+    return fallback.id;
+};
+
+
 // COTIZAR MEMBRESÍA
 export const cotizarMembresia = async (req, res) => {
     try {
@@ -15,11 +41,13 @@ export const cotizarMembresia = async (req, res) => {
         });
 
         if (!plan) {
-            return res.status(404).json({ error: "Plan no encontrado." });
+            return res.status(404).json({ error: "Plan de membresía no encontrado." });
         }
 
-        // Calcular Fechas
+        // Calcular Fechas blindadas
         const inicio = new Date(fecha_inicio);
+        if (isNaN(inicio.getTime())) return res.status(400).json({ error: "La fecha de inicio es inválida." });
+        
         const fin = new Date(inicio);
         fin.setDate(fin.getDate() + plan.duracionDias);
 
@@ -56,12 +84,7 @@ export const cotizarMembresia = async (req, res) => {
 // CREAR SOCIO + BIOMETRÍA DUAL + CONTRATO + MEMBRESÍA
 export const crearSocio = async (req, res) => {
     try {
-        const {
-            personal,
-            biometria,
-            detalles_contrato,
-            membresia
-        } = req.body;
+        const { personal, biometria, detalles_contrato, membresia } = req.body;
 
         if (!personal || !personal.nombre_completo || !personal.genero) {
             return res.status(400).json({ error: "El Nombre Completo y Género son obligatorios." });
@@ -81,20 +104,24 @@ export const crearSocio = async (req, res) => {
                     createdBy: req.user.id,
                     fotoUrl: biometria?.foto_perfil_url || null,
                     faceEncoding: biometria?.face_encoding || null,
-                    faceEncodingUpdatedAt: biometria?.face_encoding_updated_at ? new Date(biometria.face_encoding_updated_at) : null,
+                    faceEncodingUpdatedAt: biometria?.face_encoding_updated_at ? validarFecha(biometria.face_encoding_updated_at, 'Actualización Facial') : null,
                     huellaTemplate: biometria?.fingerprint_template || null,
-                    huellaUpdatedAt: biometria?.fingerprint_updated_at ? new Date(biometria.fingerprint_updated_at) : null,
+                    huellaUpdatedAt: biometria?.fingerprint_updated_at ? validarFecha(biometria.fingerprint_updated_at, 'Actualización Huella') : null,
                 }
             });
 
             // CONTRATO 
             if (detalles_contrato && detalles_contrato.contrato_firmado) {
+                const fInicioContrato = validarFecha(detalles_contrato.inicio_contrato, 'Inicio de Contrato');
+                const fFinContrato = validarFecha(detalles_contrato.fin_contrato, 'Fin de Contrato');
+                if(!fInicioContrato || !fFinContrato) throw new Error("UX_ERROR:Las fechas de contrato son requeridas si el contrato está firmado.");
+
                 await tx.socioContrato.create({
                     data: {
                         uuidSocioContrato: crypto.randomUUID(),
                         socioId: nuevoSocio.id,
-                        fechaInicio: new Date(detalles_contrato.inicio_contrato),
-                        fechaFin: new Date(detalles_contrato.fin_contrato),
+                        fechaInicio: fInicioContrato,
+                        fechaFin: fFinContrato,
                         status: 'vigente',
                         createdBy: req.user.id
                     }
@@ -104,10 +131,12 @@ export const crearSocio = async (req, res) => {
             // ASIGNAR MEMBRESÍA 
             if (membresia && membresia.plan_id) {
                 const plan = await tx.membresiaPlan.findUnique({ where: { id: parseInt(membresia.plan_id) } });
-                if (!plan) throw new Error("El plan de membresía seleccionado no existe.");
+                if (!plan) throw new Error("NOT_FOUND:El plan de membresía seleccionado no existe.");
 
-                const fechaInicio = new Date(membresia.fecha_inicio);
-                let fechaFin = membresia.fecha_vencimiento ? new Date(membresia.fecha_vencimiento) : new Date(fechaInicio);
+                const fechaInicio = validarFecha(membresia.fecha_inicio, 'Inicio de Membresía');
+                if(!fechaInicio) throw new Error("UX_ERROR:La fecha de inicio de membresía es requerida.");
+
+                let fechaFin = membresia.fecha_vencimiento ? validarFecha(membresia.fecha_vencimiento, 'Fin de Membresía') : new Date(fechaInicio);
                 if (!membresia.fecha_vencimiento) {
                     fechaFin.setDate(fechaFin.getDate() + plan.duracionDias);
                 }
@@ -141,10 +170,12 @@ export const crearSocio = async (req, res) => {
                 });
 
                 if (estadoPagoUI === 'pagado') {
+                    const metodoPagoIdValido = await validarMetodoPago(tx, membresia.metodo_pago_id);
+
                     await tx.pagoMembresia.create({
                         data: {
                             membresiaSocioId: membresiaAsignada.id,
-                            metodoPagoId: membresia.metodo_pago_id || 1, 
+                            metodoPagoId: metodoPagoIdValido, 
                             monto: precioFinal,
                             recibidoPor: req.user.id
                         }
@@ -157,7 +188,7 @@ export const crearSocio = async (req, res) => {
 
                     await tx.cajaMovimiento.create({
                         data: {
-                            corteId: cajaAbierta.id, // Atado al turno actual
+                            corteId: cajaAbierta.id, 
                             usuarioId: req.user.id,
                             conceptoId: conceptoMembresia.id,
                             tipo: 'ingreso',
@@ -184,12 +215,11 @@ export const crearSocio = async (req, res) => {
     } catch (error) {
         console.error("Error al crear socio:", error);
         
-        if (error.message === "CAJA_CERRADA") {
-            return res.status(403).json({ error: "Operación denegada: No puedes registrar un pago porque la caja está cerrada." });
-        }
-        if (error.message === "El plan de membresía seleccionado no existe.") {
-            return res.status(400).json({ error: error.message });
-        }
+        // Manejo de Errores UX mejorado (Evita los 500 genéricos)
+        if (error.message.startsWith("UX_ERROR:")) return res.status(400).json({ error: error.message.replace("UX_ERROR:", "") });
+        if (error.message.startsWith("NOT_FOUND:")) return res.status(404).json({ error: error.message.replace("NOT_FOUND:", "") });
+        if (error.message === "CAJA_CERRADA") return res.status(403).json({ error: "Operación denegada: No puedes registrar un pago porque la caja está cerrada." });
+        
         res.status(500).json({ error: "Error interno del servidor al registrar al socio." });
     }
 };
@@ -371,7 +401,7 @@ export const obtenerSocio = async (req, res) => {
     }
 };
 
-// ACTUALIZAR SOCIO (PUT) - CON CONTABILIDAD DE DOBLE PARTIDA ⚖️
+// ACTUALIZAR SOCIO (PUT) - CON CONTABILIDAD DE DOBLE PARTIDA
 export const actualizarSocio = async (req, res) => {
     try {
         const { id } = req.params;
@@ -417,12 +447,16 @@ export const actualizarSocio = async (req, res) => {
                 });
 
                 if (detalles_contrato.contrato_firmado) {
+                    const fInicioContrato = validarFecha(detalles_contrato.inicio_contrato, 'Inicio de Contrato');
+                    const fFinContrato = validarFecha(detalles_contrato.fin_contrato, 'Fin de Contrato');
+                    if(!fInicioContrato || !fFinContrato) throw new Error("UX_ERROR:Las fechas de contrato son requeridas.");
+
                     if (contratoActual) {
                         await tx.socioContrato.update({
                             where: { id: contratoActual.id },
                             data: {
-                                fechaInicio: new Date(detalles_contrato.inicio_contrato),
-                                fechaFin: new Date(detalles_contrato.fin_contrato),
+                                fechaInicio: fInicioContrato,
+                                fechaFin: fFinContrato,
                                 status: 'vigente'
                             }
                         });
@@ -431,8 +465,8 @@ export const actualizarSocio = async (req, res) => {
                             data: {
                                 uuidSocioContrato: crypto.randomUUID(),
                                 socioId: socioId,
-                                fechaInicio: new Date(detalles_contrato.inicio_contrato),
-                                fechaFin: new Date(detalles_contrato.fin_contrato),
+                                fechaInicio: fInicioContrato,
+                                fechaFin: fFinContrato,
                                 status: 'vigente',
                                 createdBy: req.user.id
                             }
@@ -465,22 +499,25 @@ export const actualizarSocio = async (req, res) => {
                 });
 
                 const planNuevo = await tx.membresiaPlan.findUnique({ where: { id: nuevoPlanId } });
-                if (!planNuevo) throw new Error("PLAN_NO_EXISTE");
+                if (!planNuevo) throw new Error("NOT_FOUND:El plan de membresía seleccionado no existe.");
 
                 const hoy = new Date();
                 const esOfertaActiva = planNuevo.esOferta && planNuevo.fechaFinOferta && new Date(planNuevo.fechaFinOferta) >= hoy;
                 const precioFinal = esOfertaActiva ? parseFloat(planNuevo.precioOferta) : parseFloat(planNuevo.precioBase);
 
                 // --- AUTO-CÁLCULO DE FECHAS ---
-                const fechaInicioReal = new Date(membresia.fecha_inicio);
-                let fechaFinReal;
+                const fechaInicioReal = validarFecha(membresia.fecha_inicio, 'Inicio de Membresía');
+                if(!fechaInicioReal) throw new Error("UX_ERROR:La fecha de inicio de membresía es requerida.");
 
+                let fechaFinReal;
                 if (membresia.fecha_vencimiento) {
-                    fechaFinReal = new Date(membresia.fecha_vencimiento);
+                    fechaFinReal = validarFecha(membresia.fecha_vencimiento, 'Fin de Membresía');
                 } else {
                     fechaFinReal = new Date(fechaInicioReal);
                     fechaFinReal.setDate(fechaFinReal.getDate() + planNuevo.duracionDias);
                 }
+
+                const metodoPagoIdValido = await validarMetodoPago(tx, membresia.metodo_pago_id);
 
                 const registrarCobro = async (membresiaId, monto, nota) => {
                     if (monto <= 0) return; // 🔥 ESCUDO: No registrar cobros de $0
@@ -489,7 +526,7 @@ export const actualizarSocio = async (req, res) => {
                     await tx.pagoMembresia.create({
                         data: {
                             membresiaSocioId: membresiaId,
-                            metodoPagoId: membresia.metodo_pago_id || 1,
+                            metodoPagoId: metodoPagoIdValido,
                             monto: monto,
                             recibidoPor: req.user.id
                         }
@@ -514,7 +551,7 @@ export const actualizarSocio = async (req, res) => {
                     await tx.pagoMembresia.create({
                         data: {
                             membresiaSocioId: membresiaId,
-                            metodoPagoId: membresia.metodo_pago_id || 1, 
+                            metodoPagoId: metodoPagoIdValido, 
                             monto: -Math.abs(monto), // Forzamos el monto a negativo
                             recibidoPor: req.user.id
                         }
@@ -575,8 +612,8 @@ export const actualizarSocio = async (req, res) => {
                         await tx.membresiaSocio.update({
                             where: { id: membresiaActual.id },
                             data: {
-                                fechaInicio: fechaInicioReal, // Ya usa el auto-cálculo
-                                fechaFin: fechaFinReal,       // Ya usa el auto-cálculo
+                                fechaInicio: fechaInicioReal, 
+                                fechaFin: fechaFinReal,       
                                 estadoPago: estadoPagoUI
                             }
                         });
@@ -598,7 +635,7 @@ export const actualizarSocio = async (req, res) => {
                     const nuevaMembresia = await tx.membresiaSocio.create({
                         data: {
                             uuidMembresiaSocio: crypto.randomUUID(), socioId: socioId, planId: nuevoPlanId,
-                            fechaInicio: fechaInicioReal, fechaFin: fechaFinReal, // Ya usa el auto-cálculo
+                            fechaInicio: fechaInicioReal, fechaFin: fechaFinReal,
                             status: 'activa', estadoPago: estadoPagoUI, precioCongelado: precioFinal, asignadoPor: req.user.id
                         }
                     });
@@ -618,12 +655,11 @@ export const actualizarSocio = async (req, res) => {
     } catch (error) {
         console.error("Error al actualizar socio:", error);
         
-        if (error.message === "CAJA_CERRADA") {
-            return res.status(403).json({ error: "Operación denegada: La actualización requiere registrar un pago o devolución, pero la caja está cerrada." });
-        }
-        if (error.message === "REGLA_CONTRATO_VIGENTE") {
-            return res.status(400).json({ error: "No se puede desactivar el contrato porque aún se encuentra vigente." });
-        }
+        // Manejo de Errores UX mejorado (Evita los 500 genéricos)
+        if (error.message.startsWith("UX_ERROR:")) return res.status(400).json({ error: error.message.replace("UX_ERROR:", "") });
+        if (error.message.startsWith("NOT_FOUND:")) return res.status(404).json({ error: error.message.replace("NOT_FOUND:", "") });
+        if (error.message === "CAJA_CERRADA") return res.status(403).json({ error: "Operación denegada: La actualización requiere registrar un pago o devolución, pero la caja está cerrada." });
+        if (error.message === "REGLA_CONTRATO_VIGENTE") return res.status(400).json({ error: "No se puede desactivar el contrato porque aún se encuentra vigente." });
 
         res.status(500).json({ error: "Error interno al actualizar el perfil del socio." });
     }
