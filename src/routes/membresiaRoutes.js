@@ -1,26 +1,31 @@
 import { Router } from "express";
-import { crearMembresia, 
+import { 
+    crearMembresia, 
     listarMembresias, 
     obtenerMembresia, 
     editarMembresia, 
     cambiarStatusMembresia,
     eliminarMembresia
-    } from "../controller/membresiaController.js";
-import { verificarToken } from "../middlewares/authMiddleware.js"
+} from "../controller/membresiaController.js";
+import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
 const router = Router();
 
-// Ruta para crear una membresía.
-router.post("/", verificarToken, crearMembresia);
-// Lista de membresías con filtros, paginación y conteo de socios.
-router.get("/", verificarToken, listarMembresias);
-// Ruta para obtener una membresía por su ID.
-router.get("/:id", verificarToken, obtenerMembresia);
-// Ruta para editar una membresía por su ID.
-router.put("/:id", verificarToken, editarMembresia);
-// Ruta para cambiar el status de una membresía por su ID.
-router.patch("/:id/status", verificarToken, cambiarStatusMembresia);
-// Ruta para eliminar una membresía por su ID.
-router.delete("/:id", verificarToken, eliminarMembresia);
+// Todas las rutas requieren estar logueado
+router.use(verificarToken);
+
+// Permisos por acción (Módulo: membresias)
+
+// Rutas de visualización
+router.get("/", verificarPermiso("membresias", "ver"), listarMembresias);
+router.get("/:id", verificarPermiso("membresias", "ver"), obtenerMembresia);
+
+// Rutas de creación y modificación
+router.post("/", verificarPermiso("membresias", "crear"), crearMembresia);
+router.put("/:id", verificarPermiso("membresias", "editar"), editarMembresia);
+router.patch("/:id/status", verificarPermiso("membresias", "editar"), cambiarStatusMembresia);
+
+// Rutas de eliminación
+router.delete("/:id", verificarPermiso("membresias", "eliminar"), eliminarMembresia);
 
 export default router;

@@ -1,21 +1,34 @@
 import { Router } from "express";
-import { validarAsistenciaFacial, obtenerHistorialAsistencias,
+import { 
+    validarAsistenciaFacial, 
+    obtenerHistorialAsistencias,
     obtenerAsistenciasHoy,
     obtenerAsistenciasSocio,
-    registrarAsistenciaManual } from "../controller/asistenciaController.js";
-import { verificarToken } from "../middlewares/authMiddleware.js"; 
+    registrarAsistenciaManual 
+} from "../controller/asistenciaController.js";
+import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js"; 
 
 const router = Router();
 
-// RUTAS DEL KIOSKO BIOMÉTRICO
-// Nota: Dependiendo de tu seguridad, esta ruta podría usar 'verificarToken' 
-// o un middleware específico para validar que la petición viene del hardware del gimnasio.
-router.post("/validar", verificarToken, validarAsistenciaFacial);
+// Todas las rutas requieren autenticación
+router.use(verificarToken);
 
-// Rutas Administrativas
-router.get("/", verificarToken, obtenerHistorialAsistencias);
-router.get("/hoy", verificarToken, obtenerAsistenciasHoy);
-router.get("/socio/:id", verificarToken, obtenerAsistenciasSocio);
-router.post("/manual", verificarToken, registrarAsistenciaManual);
+// RUTAS DEL KIOSKO BIOMÉTRICO
+// Aunque venga del kiosko, si usamos JWT, debe tener permiso de crear asistencias
+router.post("/validar", verificarPermiso("asistencia", "crear"), validarAsistenciaFacial);
+
+
+// RUTAS ADMINISTRATIVAS
+// Ver el historial general
+router.get("/", verificarPermiso("asistencia", "ver"), obtenerHistorialAsistencias);
+
+// Ver asistencias del día actual
+router.get("/hoy", verificarPermiso("asistencia", "ver"), obtenerAsistenciasHoy);
+
+// Ver asistencias de un socio en particular
+router.get("/socio/:id", verificarPermiso("asistencia", "ver"), obtenerAsistenciasSocio);
+
+// Forzar un registro manual desde la tabla (cuando la huella/cara falla)
+router.post("/manual", verificarPermiso("asistencia", "registrarManual"), registrarAsistenciaManual);
 
 export default router;
