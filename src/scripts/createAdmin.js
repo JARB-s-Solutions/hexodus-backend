@@ -5,27 +5,40 @@ import crypto from 'crypto';
 const prisma = new PrismaClient();
 
 async function main() {
-    console.log(" Iniciando la creación del Super Administrador...");
+    console.log("🛡️ Iniciando la actualización del Super Administrador...");
 
     try {
-        // 1. Buscar o crear el Rol de Administrador
-        let rolAdmin = await prisma.rol.findUnique({
-            where: { nombre: 'Administrador' }
-        });
-
-        if (!rolAdmin) {
-            console.log(" Rol 'Administrador' no encontrado. Creándolo...");
-            rolAdmin = await prisma.rol.create({
-                data: {
-                    nombre: 'Administrador',
-                    descripcion: 'Acceso total a todos los módulos del sistema',
-                    status: 'activo'
-                }
+        // 0. SOLUCIÓN AL ERROR: Liberar el nombre 'Administrador' si un rol viejo lo tiene
+        const rolAntiguo = await prisma.rol.findUnique({ where: { nombre: 'Administrador' } });
+        
+        if (rolAntiguo && rolAntiguo.id !== 'admin') {
+            console.log("⚠️ Se detectó un rol 'Administrador' con ID antiguo. Liberando el nombre...");
+            await prisma.rol.update({
+                where: { id: rolAntiguo.id },
+                data: { nombre: 'Administrador_Legacy_' + Date.now() }
             });
-            console.log(" Rol 'Administrador' creado.");
         }
 
-        // 2. Configuración de credenciales del Admin
+        // 1. Crear o actualizar el Rol con el NUEVO esquema híbrido (ID: 'admin')
+        const rolAdmin = await prisma.rol.upsert({
+            where: { id: 'admin' }, 
+            update: {
+                nombre: 'Administrador',
+                esAdministrador: true, // LA LLAVE MAESTRA
+                esSistema: true,
+                permisos: { "todo": "absoluto" } 
+            },
+            create: {
+                id: 'admin',
+                nombre: 'Administrador',
+                descripcion: 'Acceso total a todos los módulos del sistema',
+                esAdministrador: true,
+                esSistema: true,
+                permisos: { "todo": "absoluto" }
+            }
+        });
+        console.log("✅ Rol 'admin' configurado con poderes absolutos.");
+
         const adminData = {
             username: 'admin',
             email: 'al071392@uacam.mx',
@@ -33,45 +46,37 @@ async function main() {
             passwordPlain: 'Admin1234' 
         };
 
-        // 3. Verificar si el correo o username ya existen
-        const existeAdmin = await prisma.usuario.findUnique({
-            where: { email: adminData.email }
-        });
-
-        if (existeAdmin) {
-            console.log(` El usuario con el correo ${adminData.email} ya existe en la base de datos.`);
-            return;
-        }
-
-        // 4. Encriptar la contraseña (Regla de seguridad obligatoria)
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(adminData.passwordPlain, salt);
 
-        // 5. Insertar el usuario en la Base de Datos
-        const nuevoAdmin = await prisma.usuario.create({
-            data: {
-                uid: crypto.randomUUID(), // Genera un identificador único (UUID)
+        // 2. Crear o Actualizar al Usuario
+        const adminUser = await prisma.usuario.upsert({
+            where: { username: adminData.username },
+            update: {
+                rolId: rolAdmin.id, 
+                password: passwordHash,
+                status: 'activo' // Aseguramos que tenga paso libre
+            },
+            create: {
+                uid: crypto.randomUUID(),
                 username: adminData.username,
                 email: adminData.email,
                 nombreCompleto: adminData.nombreCompleto,
                 password: passwordHash,
                 rolId: rolAdmin.id,
-                status: 'activo' // Coincide con el enum EstadoGeneral
+                status: 'activo'
             }
         });
 
-        console.log(" ¡Super Administrador creado con éxito!");
+        console.log("✅ ¡Super Administrador listo y blindado!");
         console.log("-------------------------------------------------");
-        console.log(` Usuario: ${nuevoAdmin.username}`);
-        console.log(` Correo:  ${nuevoAdmin.email}`);
-        console.log(` Clave:   ${adminData.passwordPlain}`);
+        console.log(`Usuario: ${adminUser.username}`);
+        console.log(`Clave:   ${adminData.passwordPlain}`);
         console.log("-------------------------------------------------");
-        console.log("Ya puedes ir a Postman y probar el endpoint de Login.");
 
     } catch (error) {
-        console.error(" Error al crear el administrador:", error);
+        console.error("❌ Error al crear el administrador:", error);
     } finally {
-        // 6. Desconectar Prisma al terminar
         await prisma.$disconnect();
     }
 }
