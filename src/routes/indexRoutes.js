@@ -17,6 +17,7 @@ import dashboardRoutes from "./dashboardRoutes.js";
 import asistenciaRoutes from "./asistenciaRoutes.js";
 import usuarioRoutes from "./usuarioRoutes.js";
 import rolRoutes from "./rolRoutes.js";
+import auditoriaRoutes from "./auditoriaRoutes.js";
 
 const router = Router();
 
@@ -38,4 +39,6 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/asistencia", asistenciaRoutes);
 router.use("/usuarios", usuarioRoutes);
 router.use("/roles", rolRoutes);
+router.use("/auditoria", auditoriaRoutes);
+
 export default router;

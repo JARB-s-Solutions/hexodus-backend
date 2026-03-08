@@ -1,9 +1,8 @@
 import { Router } from "express";
-import { limpiarOfertasExpiradas } from "../controller/cronController.js";
+import { ejecutarMantenimientoDiario } from "../controller/cronController.js";
 
 const router = Router();
-
-// Usaremos el CRON_SECRET dentro del controlador.
-router.get("/limpiar-ofertas", limpiarOfertasExpiradas);
+// Se protege con el CRON_SECRET en los headers.
+router.post("/mantenimiento-diario", ejecutarMantenimientoDiario);
 
 export default router;

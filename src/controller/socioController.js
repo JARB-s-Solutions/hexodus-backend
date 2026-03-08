@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
+import { registrarLog } from "../services/auditoriaService.js";
 
 // AYUDANTES DE VALIDACIÓN GLOBALES
 const validarFecha = (fechaStr, nombreCampo) => {
@@ -709,6 +710,14 @@ export const eliminarSocio = async (req, res) => {
             }
         });
 
+        await registrarLog({
+        req,
+        accion: 'eliminar',
+        modulo: 'socios',
+        registroId: socioId,
+        detalles: `Socio dado de baja del gimnasio`
+    });
+
         res.status(200).json({ message: "Socio eliminado correctamente del sistema." });
 
     } catch (error) {
@@ -848,6 +857,14 @@ export const pagarMembresiaPendiente = async (req, res) => {
             });
         });
 
+        await registrarLog({
+            req,
+            accion: 'pagar',
+            modulo: 'socios',
+            registroId: socioId, // ID del socio
+            detalles: `Se procesó un pago de membresía pendiente`
+        });
+
         res.status(200).json({ message: "Pago registrado correctamente en caja." });
 
     } catch (error) {
@@ -932,6 +949,14 @@ export const renovarMembresia = async (req, res) => {
                     nota: `Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
                 }
             });
+        });
+
+        await registrarLog({
+            req,
+            accion: 'renovar',
+            modulo: 'socios',
+            registroId: socioId,
+            detalles: `Se renovó la membresía del socio`
         });
 
         res.status(201).json({ message: "Membresía renovada y cobrada exitosamente." });

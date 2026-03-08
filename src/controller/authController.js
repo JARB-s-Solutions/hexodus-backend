@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendEmail } from "../utils/email.js";
+import { registrarLog } from "../services/auditoriaService.js";
 
 // LOGIN 
 export const login = async (req, res) => {
@@ -45,6 +46,14 @@ export const login = async (req, res) => {
             process.env.JWT_SECRET, 
             { expiresIn: '1d' }
         );
+
+        await registrarLog({
+            req,
+            usuarioId: usuario.id, // 🔥 Le pasamos el ID explícitamente aquí
+            accion: 'login',
+            modulo: 'seguridad',
+            detalles: `Inicio de sesión exitoso del usuario: ${usuario.username}`
+        });
 
         // RESPUESTA 
         res.status(200).json({
