@@ -16,6 +16,7 @@ import dashboardFinancieroRoutes from "./dashboardFinancieroRoutes.js";
 import dashboardRoutes from "./dashboardRoutes.js";
 import asistenciaRoutes from "./asistenciaRoutes.js";
 import usuarioRoutes from "./usuarioRoutes.js";
+import rolRoutes from "./rolRoutes.js";
 
 const router = Router();
 
@@ -36,5 +37,5 @@ router.use("/financiero", dashboardFinancieroRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/asistencia", asistenciaRoutes);
 router.use("/usuarios", usuarioRoutes);
-
+router.use("/roles", rolRoutes);
 export default router;
