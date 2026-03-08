@@ -2,19 +2,24 @@ import { Router } from "express";
 import { obtenerResumenFinanciero, obtenerGraficasFinancieras } from "../controller/dashboardFinancieroController.js";
 import { obtenerComparacionesFinancieras } from "../controller/dashboardComparacionesController.js";
 import { listarHistorialReportes, generarReporteFinanciero } from "../controller/reporteFinancieroController.js";
-import { verificarToken } from "../middlewares/authMiddleware.js";
+import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
 const router = Router();
 
-// GET /api/financiero/resumen
-router.get("/resumen", verificarToken, obtenerResumenFinanciero);
-// GET /api/financiero/graficas
-router.get("/graficas", verificarToken, obtenerGraficasFinancieras);
-// GET /api/financiero/comparaciones
-router.get("/comparaciones", verificarToken, obtenerComparacionesFinancieras);
-// GET /api/financiero/historial-reportes
-router.get("/historial-reportes", verificarToken, listarHistorialReportes);
-// POST /api/financiero/generar-reporte
-router.post("/generar-reporte", verificarToken, generarReporteFinanciero);
+// Todas las rutas requieren estar logueado
+router.use(verificarToken);
+
+
+// Permisos por acción (Módulo: reportes)
+
+
+// Rutas de visualización (Requieren permiso para ver reportes financieros)
+router.get("/resumen", verificarPermiso("reportes", "verReporteFinanciero"), obtenerResumenFinanciero);
+router.get("/graficas", verificarPermiso("reportes", "verReporteFinanciero"), obtenerGraficasFinancieras);
+router.get("/comparaciones", verificarPermiso("reportes", "verReporteFinanciero"), obtenerComparacionesFinancieras);
+router.get("/historial-reportes", verificarPermiso("reportes", "verReporteFinanciero"), listarHistorialReportes);
+
+// Rutas de creación (Requiere permiso para crear reportes)
+router.post("/generar-reporte", verificarPermiso("reportes", "crear"), generarReporteFinanciero);
 
 export default router;
