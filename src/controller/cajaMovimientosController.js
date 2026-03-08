@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { registrarLog } from "../services/auditoriaService.js";
 
 // REGISTRAR MOVIMIENTO MANUAL (Ingreso / Egreso)
 export const registrarMovimiento = async (req, res) => {
@@ -66,6 +67,14 @@ export const registrarMovimiento = async (req, res) => {
                       `[Pago: ID ${metodo_pago_id}] ${observaciones}` : 
                       `Movimiento manual [Pago: ID ${metodo_pago_id}]`
             }
+        });
+
+        await registrarLog({
+            req,
+            accion: 'crear',
+            modulo: 'movimientos',
+            registroId: nuevoMovimiento.id, 
+            detalles: `Se registró un ${tipo_movimiento} manual por la cantidad de $${total}`
         });
 
         res.status(201).json({

@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
+import { registrarLog } from "../services/auditoriaService.js";
 
 export const crearMembresia = async (req, res) => {
     try {
@@ -315,6 +316,14 @@ export const editarMembresia = async (req, res) => {
                 fechaFinOferta: esOferta ? new Date(fechaFinOferta) : null,
                 descripcion: descripcion || null,
             }
+        });
+
+        await registrarLog({
+            req,
+            accion: 'editar',
+            modulo: 'membresias',
+            registroId: id,
+            detalles: `Se modificaron las condiciones o el precio del plan de membresía`
         });
 
         res.status(200).json({

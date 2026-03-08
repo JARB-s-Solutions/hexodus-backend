@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
+import { registrarLog } from "../services/auditoriaService.js";
 
 // CREAR PRODUCTO NUEVO (Con Stock Inicial)
 export const crearProducto = async (req, res) => {
@@ -400,6 +401,14 @@ export const actualizarProducto = async (req, res) => {
             }
         });
 
+        await registrarLog({
+            req,
+            accion: 'editar',
+            modulo: 'inventario',
+            registroId: id,
+            detalles: `Se modificaron los datos o el precio del producto`
+        });
+
         res.status(200).json({
             message: "Producto actualizado correctamente."
         });
@@ -477,6 +486,14 @@ export const ajustarStock = async (req, res) => {
                     nota: nota || `Ajuste rápido de stock: ${ajuste > 0 ? '+' : ''}${ajuste}`
                 }
             });
+        });
+
+        await registrarLog({
+            req,
+            accion: 'ajustarStock',
+            modulo: 'inventario',
+            registroId: id, // ID del producto
+            detalles: `Ajuste de stock realizado. Motivo: ${nota || 'No especificado'}. Nuevo stock: ${nuevoStock}`
         });
 
         res.status(200).json({

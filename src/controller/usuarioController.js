@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { registrarLog } from "../services/auditoriaService.js";
 
 // LISTAR USUARIOS
 export const listarUsuarios = async (req, res) => {
@@ -252,6 +253,14 @@ export const actualizarUsuario = async (req, res) => {
             include: { rol: true }
         });
 
+        await registrarLog({
+            req,
+            accion: 'editar',
+            modulo: 'usuarios',
+            registroId: id, // ID del usuario editado
+            detalles: `Se modificaron los datos/rol del usuario con ID: ${id}`
+        });
+
         res.status(200).json({
             success: true,
             data: {
@@ -290,6 +299,14 @@ export const eliminarUsuario = async (req, res) => {
         await prisma.usuario.update({
             where: { uid: id },
             data: { status: 'bloqueado' }
+        });
+
+        await registrarLog({
+            req,
+            accion: 'eliminar',
+            modulo: 'usuarios',
+            registroId: id,
+            detalles: `Usuario dado de baja del sistema`
         });
 
         res.status(200).json({

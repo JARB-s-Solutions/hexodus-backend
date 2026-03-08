@@ -14,8 +14,8 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/limpiar-ofertas",
-      "schedule": "0 0 * * *"
+      "path": "/api/cron/mantenimiento-diario",
+      "schedule": "0 6 * * *"
     }
   ]
 }

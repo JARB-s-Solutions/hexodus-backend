@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { registrarLog } from "../services/auditoriaService.js";
 
 // ABRIR CAJA (Fondo inicial) 
 export const abrirCaja = async (req, res) => {
@@ -58,6 +59,14 @@ export const abrirCaja = async (req, res) => {
             }
 
             return nuevoCorte;
+        });
+
+        await registrarLog({
+            req,
+            accion: 'abrir_caja',
+            modulo: 'ventas',
+            registroId: resultado.id,
+            detalles: `Caja abierta con un fondo inicial de $${monto_inicial || 0}`
         });
 
         res.status(201).json({
@@ -211,6 +220,14 @@ export const realizarCorte = async (req, res) => {
         }, {
             maxWait: 5000,   // Tiempo para conectarse
             timeout: 20000   // Le damos 20 segundos para procesar en lugar de los 5 por defecto
+        });
+
+        await registrarLog({
+            req,
+            accion: 'cierre_caja',
+            modulo: 'ventas',
+            registroId: resultado.id,
+            detalles: `Corte de caja realizado. Total ventas amarradas: $${resultado.totalVentas}. Observación: ${observacion || 'Ninguna'}`
         });
 
         res.status(200).json({
