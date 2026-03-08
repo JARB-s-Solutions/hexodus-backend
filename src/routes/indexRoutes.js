@@ -15,6 +15,7 @@ import cajaMovimientoRoutes from "./cajaMovimientosRoutes.js";
 import dashboardFinancieroRoutes from "./dashboardFinancieroRoutes.js";
 import dashboardRoutes from "./dashboardRoutes.js";
 import asistenciaRoutes from "./asistenciaRoutes.js";
+import usuarioRoutes from "./usuarioRoutes.js";
 
 const router = Router();
 
@@ -34,5 +35,6 @@ router.use("/movimientos", cajaMovimientoRoutes);
 router.use("/financiero", dashboardFinancieroRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/asistencia", asistenciaRoutes);
+router.use("/usuarios", usuarioRoutes);
 
 export default router;
