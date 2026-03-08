@@ -9,38 +9,44 @@ export const login = async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        // Validar que lleguen datos
         if (!username || !password) {
             return res.status(400).json({ error: "Por favor ingrese usuario y contraseña" });
         }
 
-        // Buscar usuario
         const usuario = await prisma.usuario.findUnique({
             where: { username },
             include: { rol: true } 
         });
 
-        // Validar existencia y contraseña
         if (!usuario || !(await bcrypt.compare(password, usuario.password))) {
             return res.status(401).json({ error: "Credenciales inválidas" });
         }
 
-        // Validar estado
         if (usuario.status !== 'activo') {
             return res.status(403).json({ error: "Usuario inactivo. Contacte al administrador." });
         }
 
-        // Generar Token JWT
+        // Parsear permisos JSON de forma segura
+        const permisosJson = typeof usuario.rol.permisos === 'string' 
+            ? JSON.parse(usuario.rol.permisos) 
+            : (usuario.rol.permisos || {});
+
+        // Generar Token JWT inyectando todos los permisos
         const token = jwt.sign(
             { 
                 id: usuario.id, 
-                role: usuario.rol?.nombre || 'usuario' 
+                rol: {
+                    id: usuario.rol.id,
+                    nombre: usuario.rol.nombre,
+                    esAdministrador: usuario.rol.esAdministrador
+                },
+                permisos: permisosJson
             },
             process.env.JWT_SECRET, 
             { expiresIn: '1d' }
         );
 
-        // 6. RESPUESTA CON TU ESTRUCTURA PERSONALIZADA
+        // RESPUESTA 
         res.status(200).json({
             message: "Bienvenido de nuevo",
             token: token,
@@ -48,7 +54,9 @@ export const login = async (req, res) => {
                 usuario_id: usuario.id,          
                 uid: usuario.uid,                
                 username: usuario.username,      
-                nombre_completo: usuario.nombreCompleto 
+                nombre_completo: usuario.nombreCompleto,
+                rol: usuario.rol.nombre,
+                permisos: permisosJson
             }
         });
 

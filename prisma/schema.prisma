@@ -15,6 +15,7 @@ datasource db {
 enum EstadoGeneral {
   activo
   inactivo
+  bloqueado
 }
 
 enum ContratoStatus {
@@ -117,16 +118,20 @@ model Usuario {
   password             String    @db.VarChar(255)
   ultimoAcceso         DateTime? @map("ultimo_acceso")
   
-  // Recuperación de Contraseña
   passwordResetToken   String?   @map("password_reset_token") @db.VarChar(255)
   passwordResetExpires DateTime? @map("password_reset_expires")
 
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime? @updatedAt @map("updated_at")
-  rolId                Int       @map("rol_id")
+  
+  // ¡NUEVO! Conectamos el usuario a la nueva llave foránea tipo String
+  rolId                String    @map("rol_id") @db.VarChar(50)
   rol                  Rol       @relation(fields: [rolId], references: [id])
 
-  // Relaciones Inversas (Todo lo que hace un usuario en el sistema)
+  historialRoles       HistorialRol[] @relation("UsuarioHistorialRoles")
+  rolesAsignados       HistorialRol[] @relation("AsignadorHistorialRoles")
+
+  // Relaciones Inversas Intactas
   sociosCreados        Socio[]              @relation("UsuarioSocio")
   contratosCreados     SocioContrato[]      @relation("UsuarioContrato")
   planesCreados        MembresiaPlan[]      @relation("UsuarioPlan")
@@ -143,38 +148,46 @@ model Usuario {
   accesosValidados     Acceso[]             @relation("UsuarioAcceso")
   eliminacionesLogs    EliminacionLog[]     @relation("UsuarioEliminacion")
   movimientosCaja      CajaMovimiento[]     @relation("UsuarioCajaMov")
-  
   reportesFinancieros  ReporteFinanciero[]  @relation("UsuarioReporte")
 
   @@map("usuarios")
 }
 
 model Rol {
-  id          Int      @id @default(autoincrement()) @map("rol_id")
-  nombre      String   @unique @db.VarChar(60)
-  descripcion String?  @db.VarChar(255)
-  status      String   @default("activo")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id              String   @id @map("rol_id") @db.VarChar(50)
+  nombre          String   @unique @db.VarChar(100)
+  descripcion     String?  @db.Text
+  color           String?  @db.VarChar(7)
+  icono           String?  @db.VarChar(10)
+  esAdministrador Boolean  @default(false) @map("es_administrador")
+  esSistema       Boolean  @default(false) @map("es_sistema")
+  
+  permisos        Json     @default("{}") 
+  
+  createdAt       DateTime @default(now()) @map("fecha_creacion")
+  updatedAt       DateTime? @updatedAt @map("fecha_actualizacion")
+  creadoPor       Int?     @map("creado_por")
 
-  usuarios    Usuario[]
-  permisos    RolModuloPermiso[]
+  usuarios        Usuario[]
+  historialRoles  HistorialRol[]
 
   @@map("roles")
 }
 
-model RolModuloPermiso {
-  id        Int     @id @default(autoincrement()) @map("permiso_id")
-  rolId     Int     @map("rol_id")
-  modulo    String  @db.VarChar(80)
-  canView   Boolean @default(true) @map("can_view")
-  canCreate Boolean @default(false) @map("can_create")
-  canEdit   Boolean @default(false) @map("can_edit")
-  canDelete Boolean @default(false) @map("can_delete")
+model HistorialRol {
+  id              Int      @id @default(autoincrement())
+  usuarioId       Int      @map("usuario_id") 
+  rolId           String   @map("rol_id") @db.VarChar(50)
+  rolNombre       String?  @map("rol_nombre") @db.VarChar(100)
+  fechaAsignacion DateTime @default(now()) @map("fecha_asignacion")
+  asignadoPor     Int?     @map("asignado_por")
+  observaciones   String?  @db.Text
 
-  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  usuario         Usuario  @relation("UsuarioHistorialRoles", fields: [usuarioId], references: [id])
+  asignador       Usuario? @relation("AsignadorHistorialRoles", fields: [asignadoPor], references: [id])
+  rol             Rol      @relation(fields: [rolId], references: [id])
 
-  @@unique([rolId, modulo])
-  @@map("rol_modulo_permisos")
+  @@map("historial_roles")
 }
 
 // ==========================================================
@@ -567,15 +580,15 @@ model VentaPago {
 // ==========================================================
 
 model AuditoriaLog {
-  id             Int       @id @default(autoincrement()) @map("auditoria_id")
+  id             String    @id @default(uuid()) @map("auditoria_id") @db.VarChar(50)
+  timestamp      DateTime  @default(now())
   usuarioId      Int?      @map("usuario_id")
-  moduloId       Int?      @map("modulo_id")
-  accion         String    @db.VarChar(60)
-  entidad        String?   @db.VarChar(60)
-  entidadId      Int?      @map("entidad_id")
-  detalle        Json?
+  modulo         String?   @db.VarChar(50)
+  accion         String    @db.VarChar(50)
+  descripcion    String?   @db.Text
+  detalles       Json?
   ip             String?   @db.VarChar(45)
-  createdAt      DateTime  @default(now()) @map("created_at")
+  userAgent      String?   @map("user_agent") @db.Text
 
   usuario        Usuario?  @relation("UsuarioAuditoria", fields: [usuarioId], references: [id])
 
