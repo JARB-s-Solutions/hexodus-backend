@@ -1,5 +1,48 @@
 import prisma from "../config/prisma.js";
 
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'America/Lima';
+
+const extraerPartesFechaEnZona = (date, timeZone) => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).formatToParts(date);
+
+    return parts.reduce((acc, part) => {
+        if (part.type !== 'literal') acc[part.type] = Number(part.value);
+        return acc;
+    }, {});
+};
+
+const obtenerOffsetZonaMs = (date, timeZone) => {
+    const p = extraerPartesFechaEnZona(date, timeZone);
+    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, 0);
+    return asUTC - date.getTime();
+};
+
+const fechaHoraZonaAUTC = (year, month, day, hour, minute, second, millisecond, timeZone) => {
+    const utcEstimado = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+    const offset = obtenerOffsetZonaMs(new Date(utcEstimado), timeZone);
+    return new Date(utcEstimado - offset);
+};
+
+const obtenerRangoDelDiaEnZona = (timeZone) => {
+    const ahora = new Date();
+    const p = extraerPartesFechaEnZona(ahora, timeZone);
+
+    return {
+        fecha: `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`,
+        inicio: fechaHoraZonaAUTC(p.year, p.month, p.day, 0, 0, 0, 0, timeZone),
+        fin: fechaHoraZonaAUTC(p.year, p.month, p.day, 23, 59, 59, 999, timeZone)
+    };
+};
+
 // FUNCIÓN MATEMÁTICA: DISTANCIA EUCLIDIANA
 // Compara dos arrays de 128 números. Mientras más cercano a 0, más se parecen.
 const calcularDistancia = (desc1, desc2) => {
@@ -216,10 +259,8 @@ export const obtenerHistorialAsistencias = async (req, res) => {
 export const obtenerAsistenciasHoy = async (req, res) => {
     try {
         const { tipo } = req.query; // opcional: 'IN' o 'OUT'
-        
-        const hoy = new Date();
-        const inicioHoy = new Date(hoy); inicioHoy.setHours(0, 0, 0, 0);
-        const finHoy = new Date(hoy); finHoy.setHours(23, 59, 59, 999);
+
+        const { fecha, inicio: inicioHoy, fin: finHoy } = obtenerRangoDelDiaEnZona(APP_TIMEZONE);
 
         let whereClause = { fechaHora: { gte: inicioHoy, lte: finHoy } };
         if (tipo) whereClause.tipo = tipo;
@@ -255,7 +296,7 @@ export const obtenerAsistenciasHoy = async (req, res) => {
         res.status(200).json({
             success: true,
             data: {
-                fecha: inicioHoy.toISOString().split('T')[0],
+                fecha,
                 asistencias: dataFormateada,
                 resumen: {
                     total_asistencias: accesos.length,
