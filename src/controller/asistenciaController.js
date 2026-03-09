@@ -374,3 +374,127 @@ export const registrarAsistenciaManual = async (req, res) => {
         res.status(500).json({ success: false, message: "Error interno al registrar asistencia." });
     }
 };
+
+// OBTENER TEMPLATES DE HUELLAS PARA EL KIOSKO LOCAL
+export const sincronizarHuellas = async (req, res) => {
+    try {
+        // Solo traemos los socios que están activos, no eliminados y que SÍ tienen huella registrada
+        const sociosConHuella = await prisma.socio.findMany({
+            where: { 
+                status: 'activo', 
+                isDeleted: false, 
+                huellaTemplate: { not: null } 
+            },
+            select: {
+                id: true,
+                codigoSocio: true,
+                huellaTemplate: true,
+                huellaUpdatedAt: true 
+            }
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Sincronización de huellas exitosa",
+            data: sociosConHuella,
+            total: sociosConHuella.length
+        });
+    } catch (error) {
+        console.error("Error al sincronizar huellas:", error);
+        res.status(500).json({ success: false, message: "Error interno al obtener los templates biométricos." });
+    }
+};
+
+// VALIDAR ASISTENCIA (Reconocimiento por Huella Dactilar)
+export const validarAsistenciaHuella = async (req, res) => {
+    try {
+        const { socioId, codigoSocio, tipo = 'IN', kioskId, confidence = 100 } = req.body;
+
+        // Validamos que el frontend nos haya mandado al menos un identificador
+        if (!socioId && !codigoSocio) {
+            return res.status(400).json({ success: false, message: "Debes enviar el ID o Código del socio reconocido." });
+        }
+
+        // 1. Buscar al socio y su membresía activa
+        const socio = await prisma.socio.findFirst({
+            where: {
+                // Buscamos por ID o por Código, dependiendo de qué mande el frontend
+                OR: [
+                    { id: parseInt(socioId) || undefined },
+                    { codigoSocio: codigoSocio || undefined }
+                ],
+                status: 'activo',
+                isDeleted: false
+            },
+            include: {
+                membresias: { 
+                    where: { status: 'activa' }, 
+                    orderBy: { fechaFin: 'desc' }, 
+                    take: 1,
+                    include: { plan: true }
+                }
+            }
+        });
+
+        if (!socio) {
+            return res.status(404).json({ success: false, message: "Socio no encontrado o inactivo." });
+        }
+
+        // 2. VALIDAR MEMBRESÍA VIGENTE
+        const membresiaActual = socio.membresias[0];
+        const hoy = new Date();
+
+        if (!membresiaActual || new Date(membresiaActual.fechaFin) < hoy) {
+            return res.status(403).json({
+                success: false,
+                message: "Membresía vencida o inactiva",
+                data: {
+                    socio: {
+                        nombre_completo: socio.nombreCompleto,
+                        codigo_socio: socio.codigoSocio,
+                        fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null
+                    },
+                    sugerencia: "Por favor, renueva tu membresía en recepción."
+                }
+            });
+        }
+
+        // 3. REGISTRAR EL ACCESO EXITOSO
+        const nuevoAcceso = await prisma.acceso.create({
+            data: {
+                socioId: socio.id,
+                tipo: tipo, // 'IN' o 'OUT'
+                dispositivoId: kioskId,
+                metodo: 'huella', // Especificamos que fue por huella
+                confidence: confidence, // Nivel de coincidencia que mande el SDK (ej. 98.5)
+                validado: true
+            }
+        });
+
+        // 4. RESPONDER 
+        return res.status(200).json({
+            success: true,
+            message: `¡Bienvenido, ${socio.nombreCompleto.split(' ')[0]}!`,
+            data: {
+                socio: {
+                    id: socio.id,
+                    codigo_socio: socio.codigoSocio,
+                    nombre_completo: socio.nombreCompleto,
+                    foto_perfil_url: socio.fotoUrl,
+                    membresia: membresiaActual.plan.nombre,
+                    fecha_fin_membresia: membresiaActual.fechaFin
+                },
+                asistencia: {
+                    id: nuevoAcceso.id,
+                    tipo: nuevoAcceso.tipo,
+                    timestamp: nuevoAcceso.fechaHora,
+                    metodo: 'huella'
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Error en validación por huella:", error);
+        res.status(500).json({ success: false, message: "Error interno del servidor." });
+    }
+};

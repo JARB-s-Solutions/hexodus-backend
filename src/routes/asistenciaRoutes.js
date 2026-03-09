@@ -4,7 +4,9 @@ import {
     obtenerHistorialAsistencias,
     obtenerAsistenciasHoy,
     obtenerAsistenciasSocio,
-    registrarAsistenciaManual 
+    registrarAsistenciaManual,
+    sincronizarHuellas,
+    validarAsistenciaHuella 
 } from "../controller/asistenciaController.js";
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js"; 
 
@@ -18,7 +20,14 @@ router.use(verificarToken);
 router.post("/validar", verificarPermiso("asistencia", "crear"), validarAsistenciaFacial);
 
 
+
 // RUTAS ADMINISTRATIVAS
+
+
+router.get("/huellas/sincronizar", verificarToken, sincronizarHuellas);
+// 2. Ruta para registrar la entrada cuando el lector local hace Match
+router.post("/huellas/validar", verificarToken, validarAsistenciaHuella);
+
 // Ver el historial general
 router.get("/", verificarPermiso("asistencia", "ver"), obtenerHistorialAsistencias);
 
