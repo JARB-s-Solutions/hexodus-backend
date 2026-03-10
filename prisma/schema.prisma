@@ -320,8 +320,13 @@ model MembresiaSocio {
 }
 
 model MetodoPago {
-  id             Int       @id @default(autoincrement()) @map("metodo_pago_id")
-  nombre         String    @unique @db.VarChar(40)
+  id             Int           @id @default(autoincrement()) @map("metodo_pago_id")
+  nombre         String        @unique @db.VarChar(40)
+  status         EstadoGeneral @default(activo)
+  isDeleted      Boolean       @default(false) @map("is_deleted")
+  deletedAt      DateTime?     @map("deleted_at")
+  createdBy      Int?          @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
 
   pagosMembresia PagoMembresia[]
   ventaPagos     VentaPago[]

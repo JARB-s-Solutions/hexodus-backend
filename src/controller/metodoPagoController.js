@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { aHoraCampeche } from "../utils/dateHelper.js"; // 🔥 Importamos el ayudante
 
 // CREAR MÉTODO DE PAGO
 export const crearMetodoPago = async (req, res) => {
@@ -9,7 +10,6 @@ export const crearMetodoPago = async (req, res) => {
             return res.status(400).json({ error: "El nombre del método de pago es obligatorio." });
         }
 
-        // Verificar que no exista uno con el mismo nombre (tu esquema dice @unique)
         const existe = await prisma.metodoPago.findUnique({
             where: { nombre: nombre }
         });
@@ -18,14 +18,24 @@ export const crearMetodoPago = async (req, res) => {
             return res.status(400).json({ error: "Este método de pago ya está registrado." });
         }
 
-        // Crear en la BD
         const nuevoMetodo = await prisma.metodoPago.create({
-            data: { nombre: nombre }
+            data: { 
+                nombre: nombre,
+                createdBy: req.user?.id || null 
+            }
         });
 
         res.status(201).json({
             message: "Método de pago creado exitosamente.",
-            data: nuevoMetodo
+            data: {
+                id: nuevoMetodo.id,
+                nombre: nuevoMetodo.nombre,
+                status: nuevoMetodo.status,
+                is_deleted: nuevoMetodo.isDeleted,
+                deleted_at: aHoraCampeche(nuevoMetodo.deletedAt), // 🔥 Formateamos a Campeche
+                create_by: nuevoMetodo.createdBy,
+                create_at: aHoraCampeche(nuevoMetodo.createdAt)   // 🔥 Formateamos a Campeche
+            }
         });
 
     } catch (error) {
@@ -38,12 +48,23 @@ export const crearMetodoPago = async (req, res) => {
 export const listarMetodosPago = async (req, res) => {
     try {
         const metodos = await prisma.metodoPago.findMany({
-            orderBy: { id: 'asc' } // Traerlos ordenados por ID (1, 2, 3...)
+            where: { isDeleted: false },
+            orderBy: { id: 'asc' } 
         });
+
+        const dataFormateada = metodos.map(m => ({
+            id: m.id,
+            nombre: m.nombre,
+            status: m.status,
+            is_deleted: m.isDeleted,
+            deleted_at: aHoraCampeche(m.deletedAt), // 🔥 Formateamos a Campeche
+            create_by: m.createdBy,
+            create_at: aHoraCampeche(m.createdAt)   // 🔥 Formateamos a Campeche
+        }));
 
         res.status(200).json({
             message: "Métodos de pago obtenidos.",
-            data: metodos
+            data: dataFormateada
         });
 
     } catch (error) {
