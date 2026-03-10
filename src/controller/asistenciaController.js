@@ -1,19 +1,13 @@
 import prisma from "../config/prisma.js";
 
-const APP_TIMEZONE = process.env.APP_TIMEZONE || 'America/Lima';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'America/Merida';
 
+// AYUDANTES DE ZONA HORARIA Y MATEMÁTICAS
 const extraerPartesFechaEnZona = (date, timeZone) => {
     const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
     }).formatToParts(date);
-
     return parts.reduce((acc, part) => {
         if (part.type !== 'literal') acc[part.type] = Number(part.value);
         return acc;
@@ -35,7 +29,6 @@ const fechaHoraZonaAUTC = (year, month, day, hour, minute, second, millisecond, 
 const obtenerRangoDelDiaEnZona = (timeZone) => {
     const ahora = new Date();
     const p = extraerPartesFechaEnZona(ahora, timeZone);
-
     return {
         fecha: `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`,
         inicio: fechaHoraZonaAUTC(p.year, p.month, p.day, 0, 0, 0, 0, timeZone),
@@ -43,8 +36,6 @@ const obtenerRangoDelDiaEnZona = (timeZone) => {
     };
 };
 
-// FUNCIÓN MATEMÁTICA: DISTANCIA EUCLIDIANA
-// Compara dos arrays de 128 números. Mientras más cercano a 0, más se parecen.
 const calcularDistancia = (desc1, desc2) => {
     if (!desc1 || !desc2 || desc1.length !== desc2.length) return 1.0; 
     let sum = 0;
@@ -54,119 +45,112 @@ const calcularDistancia = (desc1, desc2) => {
     return Math.sqrt(sum);
 };
 
-// 1. VALIDAR ASISTENCIA (Reconocimiento Facial)
+// VALIDAR ASISTENCIA FACIAL (Kiosco principal)
 export const validarAsistenciaFacial = async (req, res) => {
     try {
         const { faceDescriptor, tipo = 'IN', kioskId } = req.body;
         const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
         if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
-            return res.status(400).json({ success: false, message: "Descriptor facial inválido. Deben ser 128 dimensiones." });
+            return res.status(400).json({ success: false, message: "Descriptor facial inválido." });
         }
 
-        // 1. Obtener solo socios activos que tengan rostro registrado
         const sociosActivos = await prisma.socio.findMany({
             where: { status: 'activo', isDeleted: false, faceEncoding: { not: null } },
             include: {
-                membresias: { 
-                    where: { status: 'activa' }, 
-                    orderBy: { fechaFin: 'desc' }, 
-                    take: 1,
-                    include: { plan: true }
-                }
+                membresias: { orderBy: { fechaFin: 'desc' }, take: 1, include: { plan: true } }
             }
         });
 
-        // 2. Buscar el mejor Match (El que tenga la distancia más corta)
         let bestMatch = null;
-        let bestDistance = 1.0; // 1.0 es el peor caso (muy diferentes)
+        let bestDistance = 1.0; 
 
         for (const socio of sociosActivos) {
-            // Prisma devuelve el JSON como un array o un objeto parseado
             const dbDescriptor = typeof socio.faceEncoding === 'string' ? JSON.parse(socio.faceEncoding) : socio.faceEncoding;
-            
             const distance = calcularDistancia(faceDescriptor, dbDescriptor);
-            
             if (distance < bestDistance) {
                 bestDistance = distance;
                 bestMatch = socio;
             }
         }
 
-        // UMBRAL DE ACEPTACIÓN: Usualmente 0.4 o 0.5 para Face-API.js. 
-        // Ajusta este número según tus pruebas de iluminación. (Menor = Más estricto)
         const UMBRAL_ACEPTACION = 0.45;
 
-        // 3. SI NO HAY MATCH
+        // CASO 1: ROSTRO NO RECONOCIDO EN ABSOLUTO
         if (bestDistance > UMBRAL_ACEPTACION || !bestMatch) {
-            // Guardar intento fallido para seguridad/auditoría
             await prisma.intentoAccesoFallido.create({
-                data: {
-                    faceDescriptor: faceDescriptor,
-                    matchDistanceMinimo: bestDistance,
-                    dispositivoId: kioskId,
-                    ipAddress: clientIp
-                }
+                data: { faceDescriptor: faceDescriptor, matchDistanceMinimo: bestDistance, dispositivoId: kioskId, ipAddress: clientIp }
             });
 
-            return res.status(401).json({
-                success: false,
-                message: "Rostro no reconocido",
-                data: { sugerencia: "Por favor, acércate a recepción." }
+            return res.status(200).json({
+                success: true, // El request fue exitoso, la decisión de negocio fue "denegado"
+                message: "Acceso denegado",
+                data: {
+                    decision: "denegado",
+                    motivo_codigo: "no_registrado",
+                    motivo_texto: "Rostro no reconocido por el sistema",
+                    socio: null,
+                    asistencia: null
+                }
             });
         }
 
-        // 4. SI HAY MATCH -> VALIDAR MEMBRESÍA
+        // CASO 2: SOCIO RECONOCIDO - VALIDAMOS REGLAS DE NEGOCIO
         const membresiaActual = bestMatch.membresias[0];
         const hoy = new Date();
-        const nivelConfianza = Math.max(0, (1 - bestDistance) * 100); // Convierte distancia a % (Ej: 0.4 -> 60% confianza)
+        const nivelConfianza = Math.max(0, (1 - bestDistance) * 100); 
 
-        if (!membresiaActual || new Date(membresiaActual.fechaFin) < hoy) {
-            return res.status(403).json({
-                success: false,
-                message: "Membresía vencida o inactiva",
-                data: {
-                    socio: {
-                        nombre_completo: bestMatch.nombreCompleto,
-                        codigo_socio: bestMatch.codigoSocio,
-                        fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null
-                    },
-                    sugerencia: "Por favor, renueva tu membresía en recepción."
-                }
-            });
+        let decision = "permitido";
+        let motivo_codigo = "ok";
+        let motivo_texto = "Membresía vigente";
+        let estado_acceso = "permitido";
+        let tipoAcceso = tipo; 
+
+        if (!membresiaActual) {
+            decision = "denegado"; motivo_codigo = "sin_membresia"; motivo_texto = "Socio sin membresía asignada"; estado_acceso = "denegado"; tipoAcceso = "DENEGADO";
+        } else if (new Date(membresiaActual.fechaFin) < hoy) {
+            decision = "denegado"; motivo_codigo = "membresia_vencida"; motivo_texto = "Membresía vencida"; estado_acceso = "denegado"; tipoAcceso = "DENEGADO";
+        } else if (membresiaActual.estadoPago === 'sin_pagar') {
+            decision = "denegado"; motivo_codigo = "sin_pago"; motivo_texto = "Membresía sin pagar"; estado_acceso = "denegado"; tipoAcceso = "DENEGADO";
         }
 
-        // 5. REGISTRAR EL ACCESO EXITOSO
+        // REGISTRAR EN BITÁCORA (Tanto permitidos como denegados para trazabilidad)
         const nuevoAcceso = await prisma.acceso.create({
             data: {
                 socioId: bestMatch.id,
-                tipo: tipo, // 'IN' o 'OUT'
+                tipo: tipoAcceso,
                 dispositivoId: kioskId,
                 metodo: 'facial',
                 confidence: nivelConfianza,
                 matchDistance: bestDistance,
-                validado: true
+                validado: decision === 'permitido',
+                estadoAcceso: estado_acceso,
+                motivoCodigo: motivo_codigo,
+                motivo: motivo_texto
             }
         });
 
-        // 6. RESPONDER AL KIOSKO PARA ABRIR PUERTA/TORNIQUETE
         return res.status(200).json({
             success: true,
-            message: `¡Bienvenido, ${bestMatch.nombreCompleto.split(' ')[0]}!`,
+            message: decision === 'permitido' ? "Acceso permitido" : "Acceso denegado",
             data: {
+                decision: decision,
+                motivo_codigo: motivo_codigo,
+                motivo_texto: motivo_texto,
                 socio: {
                     id: bestMatch.id,
                     codigo_socio: bestMatch.codigoSocio,
                     nombre_completo: bestMatch.nombreCompleto,
-                    foto_perfil_url: bestMatch.fotoUrl,
-                    membresia: membresiaActual.plan.nombre,
-                    fecha_fin_membresia: membresiaActual.fechaFin
+                    membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin plan',
+                    fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null,
+                    estado_pago: membresiaActual ? membresiaActual.estadoPago : 'N/A'
                 },
                 asistencia: {
                     id: nuevoAcceso.id,
                     tipo: nuevoAcceso.tipo,
+                    estado_acceso: nuevoAcceso.estadoAcceso,
                     timestamp: nuevoAcceso.fechaHora,
-                    confidence: nivelConfianza.toFixed(1)
+                    confidence: (1 - bestDistance).toFixed(2) // Formato normalizado (e0.67) solicitado por frontend
                 }
             }
         });
@@ -177,8 +161,7 @@ export const validarAsistenciaFacial = async (req, res) => {
     }
 };
 
-
-// 2. HISTORIAL GENERAL DE ASISTENCIAS
+// HISTORIAL GENERAL DE ASISTENCIAS
 export const obtenerHistorialAsistencias = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -186,7 +169,6 @@ export const obtenerHistorialAsistencias = async (req, res) => {
         const skip = (page - 1) * limit;
 
         const { fecha_inicio, fecha_fin, tipo, metodo, search } = req.query;
-
         let whereClause = {};
 
         if (fecha_inicio && fecha_fin) {
@@ -196,8 +178,8 @@ export const obtenerHistorialAsistencias = async (req, res) => {
             };
         }
 
-        if (tipo) whereClause.tipo = tipo; // 'IN' o 'OUT'
-        if (metodo) whereClause.metodo = metodo; // 'facial', 'manual', etc.
+        if (tipo) whereClause.tipo = tipo; 
+        if (metodo) whereClause.metodo = metodo; 
 
         if (search) {
             whereClause.socio = {
@@ -211,14 +193,8 @@ export const obtenerHistorialAsistencias = async (req, res) => {
         const [totalRecords, accesos] = await Promise.all([
             prisma.acceso.count({ where: whereClause }),
             prisma.acceso.findMany({
-                where: whereClause,
-                skip: skip,
-                take: limit,
-                orderBy: { fechaHora: 'desc' },
-                include: {
-                    socio: { select: { nombreCompleto: true, codigoSocio: true, fotoUrl: true } },
-                    validador: { select: { nombreCompleto: true } } // Si fue manual, quién lo dejó pasar
-                }
+                where: whereClause, skip: skip, take: limit, orderBy: { fechaHora: 'desc' },
+                include: { socio: { select: { nombreCompleto: true, codigoSocio: true, fotoUrl: true } }, validador: { select: { nombreCompleto: true } } }
             })
         ]);
 
@@ -229,36 +205,30 @@ export const obtenerHistorialAsistencias = async (req, res) => {
             codigo_socio: a.socio.codigoSocio,
             foto_perfil_url: a.socio.fotoUrl,
             timestamp: a.fechaHora,
-            tipo: a.tipo,
+            tipo: a.tipo, // IN, OUT, DENEGADO
+            estado_acceso: a.estadoAcceso, // permitido, denegado
+            motivo_codigo: a.motivoCodigo,
+            motivo_texto: a.motivo,
             metodo: a.metodo,
             confidence: a.confidence ? parseFloat(a.confidence) : null,
             kiosk_id: a.dispositivoId,
             validador_manual: a.validador ? a.validador.nombreCompleto : null,
-            notas: a.motivo
+            notas: a.motivo 
         }));
 
         res.status(200).json({
             success: true,
-            data: {
-                asistencias: dataFormateada,
-                pagination: {
-                    total: totalRecords,
-                    page: page,
-                    limit: limit,
-                    total_pages: Math.ceil(totalRecords / limit)
-                }
-            }
+            data: { asistencias: dataFormateada, pagination: { total: totalRecords, page: page, limit: limit, total_pages: Math.ceil(totalRecords / limit) } }
         });
     } catch (error) {
-        console.error("Error al obtener historial de asistencias:", error);
         res.status(500).json({ success: false, message: "Error al obtener el historial." });
     }
 };
 
-// 3. ASISTENCIAS DE HOY (Para Dashboards Rápidos)
+// ASISTENCIAS DE HOY (Dashboards)
 export const obtenerAsistenciasHoy = async (req, res) => {
     try {
-        const { tipo } = req.query; // opcional: 'IN' o 'OUT'
+        const { tipo } = req.query; 
 
         const { fecha, inicio: inicioHoy, fin: finHoy } = obtenerRangoDelDiaEnZona(APP_TIMEZONE);
 
@@ -271,23 +241,25 @@ export const obtenerAsistenciasHoy = async (req, res) => {
             include: { socio: { select: { nombreCompleto: true, codigoSocio: true, fotoUrl: true } } }
         });
 
-        let entradas = 0, salidas = 0, sumaConfidence = 0, conBiometria = 0;
+        let entradas = 0, salidas = 0, denegados = 0, sumaConfidence = 0, conBiometria = 0;
 
         const dataFormateada = accesos.map(a => {
             if (a.tipo === 'IN') entradas++;
-            if (a.tipo === 'OUT') salidas++;
-            if (a.confidence) {
-                sumaConfidence += parseFloat(a.confidence);
-                conBiometria++;
-            }
+            else if (a.tipo === 'OUT') salidas++;
+            else if (a.tipo === 'DENEGADO') denegados++;
+
+            if (a.confidence) { sumaConfidence += parseFloat(a.confidence); conBiometria++; }
 
             return {
                 id: a.id,
                 socio_nombre: a.socio.nombreCompleto,
                 codigo_socio: a.socio.codigoSocio,
                 foto_perfil_url: a.socio.fotoUrl,
-                hora: a.fechaHora.toTimeString().split(' ')[0], // "18:30:45"
+                hora: a.fechaHora.toTimeString().split(' ')[0], 
                 tipo: a.tipo,
+                estado_acceso: a.estadoAcceso,
+                motivo_codigo: a.motivoCodigo,
+                motivo_texto: a.motivo,
                 metodo: a.metodo,
                 confidence: a.confidence ? parseFloat(a.confidence) : null
             };
@@ -302,18 +274,18 @@ export const obtenerAsistenciasHoy = async (req, res) => {
                     total_asistencias: accesos.length,
                     entradas: entradas,
                     salidas: salidas,
+                    denegados: denegados, // NUEVO CONTADOR PARA EL FRONTEND
                     socios_activos_ahora: Math.max(0, entradas - salidas),
                     promedio_confidence: conBiometria > 0 ? Number((sumaConfidence / conBiometria).toFixed(1)) : 0
                 }
             }
         });
     } catch (error) {
-        console.error("Error al obtener asistencias de hoy:", error);
         res.status(500).json({ success: false, message: "Error al obtener asistencias del día." });
     }
 };
 
-// 4. HISTORIAL DE UN SOCIO ESPECÍFICO
+// HISTORIAL DE UN SOCIO ESPECÍFICO
 export const obtenerAsistenciasSocio = async (req, res) => {
     try {
         const socioId = parseInt(req.params.id);
@@ -340,6 +312,9 @@ export const obtenerAsistenciasSocio = async (req, res) => {
                     id: a.id,
                     timestamp: a.fechaHora,
                     tipo: a.tipo,
+                    estado_acceso: a.estadoAcceso, 
+                    motivo_codigo: a.motivoCodigo, 
+                    motivo_texto: a.motivo,       
                     metodo: a.metodo,
                     confidence: a.confidence ? parseFloat(a.confidence) : null
                 })),
@@ -350,23 +325,20 @@ export const obtenerAsistenciasSocio = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Error al obtener asistencias del socio:", error);
         res.status(500).json({ success: false, message: "Error al obtener historial del socio." });
     }
 };
 
-// 5. REGISTRAR ASISTENCIA MANUAL (Desde Recepción)
+// REGISTRAR ASISTENCIA MANUAL (Desde Recepción)
 export const registrarAsistenciaManual = async (req, res) => {
     try {
-        // Ahora extraemos 'clave' en lugar de 'socio_id'
         const { clave, tipo = 'IN', notas } = req.body;
-        const usuarioId = req.user.id; // El recepcionista/admin que está logueado
+        const usuarioId = req.user.id; 
 
         if (!clave) {
-            return res.status(400).json({ success: false, message: "La clave del socio es requerida (ej. SOC-544935)." });
+            return res.status(400).json({ success: false, message: "La clave del socio es requerida." });
         }
 
-        // Buscamos al socio usando su código (codigoSocio)
         const socio = await prisma.socio.findFirst({
             where: { codigoSocio: clave },
             include: { membresias: { where: { status: 'activa' }, take: 1 } }
@@ -380,17 +352,17 @@ export const registrarAsistenciaManual = async (req, res) => {
         const tieneMembresia = socio.membresias.length > 0 && new Date(socio.membresias[0].fechaFin) >= hoy;
 
         if (!tieneMembresia && tipo === 'IN') {
-             // Bloqueamos la entrada si no tiene membresía vigente
              return res.status(403).json({ success: false, message: "El socio no tiene una membresía activa o vigente." });
         }
 
-        // Registramos el acceso usando el ID interno que acabamos de encontrar
         const nuevoAcceso = await prisma.acceso.create({
             data: {
                 socioId: socio.id,
                 tipo: tipo,
                 metodo: 'manual',
                 validado: true,
+                estadoAcceso: 'permitido',
+                motivoCodigo: 'ok',
                 motivo: notas || 'Ingreso manual por recepción',
                 usuarioId: usuarioId
             }
@@ -406,86 +378,75 @@ export const registrarAsistenciaManual = async (req, res) => {
                 nombre: socio.nombreCompleto,
                 timestamp: nuevoAcceso.fechaHora,
                 tipo: nuevoAcceso.tipo,
+                estado_acceso: nuevoAcceso.estadoAcceso,
+                motivo_codigo: nuevoAcceso.motivoCodigo,
                 metodo: nuevoAcceso.metodo,
-                notas: nuevoAcceso.motivo
+                notas: nuevoAcceso.motivo // Para frontend viejo
             }
         });
     } catch (error) {
-        console.error("Error al registrar asistencia manual:", error);
         res.status(500).json({ success: false, message: "Error interno al registrar asistencia." });
     }
 };
 
-// OBTENER TEMPLATES DE HUELLAS PARA EL KIOSKO LOCAL
+// SINCRONIZAR HUELLAS (Kiosko Local)
 export const sincronizarHuellas = async (req, res) => {
     try {
-        // Solo traemos los socios que están activos, no eliminados y que SÍ tienen huella registrada
         const sociosConHuella = await prisma.socio.findMany({
-            where: { 
-                status: 'activo', 
-                isDeleted: false, 
-                huellaTemplate: { not: null } 
-            },
-            select: {
-                id: true,
-                codigoSocio: true,
-                huellaTemplate: true,
-                huellaUpdatedAt: true 
-            }
+            where: { status: 'activo', isDeleted: false, huellaTemplate: { not: null } },
+            select: { id: true, codigoSocio: true, huellaTemplate: true, huellaUpdatedAt: true }
         });
 
         res.status(200).json({
-            success: true,
-            message: "Sincronización de huellas exitosa",
-            data: sociosConHuella,
-            total: sociosConHuella.length
+            success: true, message: "Sincronización de huellas exitosa",
+            data: sociosConHuella, total: sociosConHuella.length
         });
     } catch (error) {
-        console.error("Error al sincronizar huellas:", error);
         res.status(500).json({ success: false, message: "Error interno al obtener los templates biométricos." });
     }
 };
 
-// VALIDAR ASISTENCIA (Reconocimiento por Huella Dactilar)
+// VALIDAR ASISTENCIA (Huella Dactilar Local)
 export const validarAsistenciaHuella = async (req, res) => {
     try {
         const { socioId, codigoSocio, tipo = 'IN', kioskId, confidence = 100 } = req.body;
 
-        // Validamos que el frontend nos haya mandado al menos un identificador
         if (!socioId && !codigoSocio) {
             return res.status(400).json({ success: false, message: "Debes enviar el ID o Código del socio reconocido." });
         }
 
-        // 1. Buscar al socio y su membresía activa
         const socio = await prisma.socio.findFirst({
             where: {
-                // Buscamos por ID o por Código, dependiendo de qué mande el frontend
-                OR: [
-                    { id: parseInt(socioId) || undefined },
-                    { codigoSocio: codigoSocio || undefined }
-                ],
-                status: 'activo',
-                isDeleted: false
+                OR: [ { id: parseInt(socioId) || undefined }, { codigoSocio: codigoSocio || undefined } ],
+                status: 'activo', isDeleted: false
             },
-            include: {
-                membresias: { 
-                    where: { status: 'activa' }, 
-                    orderBy: { fechaFin: 'desc' }, 
-                    take: 1,
-                    include: { plan: true }
-                }
-            }
+            include: { membresias: { where: { status: 'activa' }, orderBy: { fechaFin: 'desc' }, take: 1, include: { plan: true } } }
         });
 
         if (!socio) {
             return res.status(404).json({ success: false, message: "Socio no encontrado o inactivo." });
         }
 
-        // 2. VALIDAR MEMBRESÍA VIGENTE
         const membresiaActual = socio.membresias[0];
         const hoy = new Date();
 
+        // Si la membresía venció o no tiene, guardamos el log de DENEGADO sin romper la estructura de respuesta (403) del front viejo
         if (!membresiaActual || new Date(membresiaActual.fechaFin) < hoy) {
+            
+            await prisma.acceso.create({
+                data: {
+                    socioId: socio.id,
+                    tipo: 'DENEGADO',
+                    dispositivoId: kioskId,
+                    metodo: 'huella',
+                    confidence: confidence,
+                    validado: false,
+                    estadoAcceso: 'denegado',
+                    motivoCodigo: !membresiaActual ? 'sin_membresia' : 'membresia_vencida',
+                    motivo: !membresiaActual ? 'Sin membresía' : 'Membresía vencida'
+                }
+            });
+
             return res.status(403).json({
                 success: false,
                 message: "Membresía vencida o inactiva",
@@ -500,42 +461,58 @@ export const validarAsistenciaHuella = async (req, res) => {
             });
         }
 
-        // 3. REGISTRAR EL ACCESO EXITOSO
         const nuevoAcceso = await prisma.acceso.create({
             data: {
-                socioId: socio.id,
-                tipo: tipo, // 'IN' o 'OUT'
-                dispositivoId: kioskId,
-                metodo: 'huella', // Especificamos que fue por huella
-                confidence: confidence, // Nivel de coincidencia que mande el SDK (ej. 98.5)
-                validado: true
+                socioId: socio.id, tipo: tipo, dispositivoId: kioskId, metodo: 'huella', confidence: confidence,
+                validado: true, estadoAcceso: 'permitido', motivoCodigo: 'ok', motivo: 'Membresía vigente'
             }
         });
 
-        // 4. RESPONDER 
         return res.status(200).json({
             success: true,
             message: `¡Bienvenido, ${socio.nombreCompleto.split(' ')[0]}!`,
             data: {
                 socio: {
-                    id: socio.id,
-                    codigo_socio: socio.codigoSocio,
-                    nombre_completo: socio.nombreCompleto,
-                    foto_perfil_url: socio.fotoUrl,
-                    membresia: membresiaActual.plan.nombre,
-                    fecha_fin_membresia: membresiaActual.fechaFin
+                    id: socio.id, codigo_socio: socio.codigoSocio, nombre_completo: socio.nombreCompleto,
+                    foto_perfil_url: socio.fotoUrl, membresia: membresiaActual.plan.nombre, fecha_fin_membresia: membresiaActual.fechaFin
                 },
                 asistencia: {
-                    id: nuevoAcceso.id,
-                    tipo: nuevoAcceso.tipo,
-                    timestamp: nuevoAcceso.fechaHora,
-                    metodo: 'huella'
+                    id: nuevoAcceso.id, tipo: nuevoAcceso.tipo, timestamp: nuevoAcceso.fechaHora, metodo: 'huella',
+                    estado_acceso: nuevoAcceso.estadoAcceso
                 }
             }
         });
 
     } catch (error) {
-        console.error("Error en validación por huella:", error);
         res.status(500).json({ success: false, message: "Error interno del servidor." });
+    }
+};
+
+// ENDPOINT COMPENSATORIO (MARCAR DENEGADO MANUALMENTE)
+export const marcarAsistenciaDenegada = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { motivo_codigo, motivo_texto } = req.body;
+
+        if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
+
+        const accesoDb = await prisma.acceso.findUnique({ where: { id: parseInt(id) }});
+        if (!accesoDb) return res.status(404).json({ error: "Registro de acceso no encontrado." });
+
+        await prisma.acceso.update({
+            where: { id: parseInt(id) },
+            data: {
+                tipo: 'DENEGADO',
+                validado: false,
+                estadoAcceso: 'denegado',
+                motivoCodigo: motivo_codigo || 'denegado_manual',
+                motivo: motivo_texto || 'Denegado manualmente desde recepción'
+            }
+        });
+
+        res.status(200).json({ message: "Asistencia actualizada a denegada correctamente." });
+
+    } catch (error) {
+        res.status(500).json({ error: "Error interno al actualizar la asistencia." });
     }
 };
