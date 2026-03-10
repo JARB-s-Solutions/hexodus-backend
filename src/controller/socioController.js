@@ -266,11 +266,11 @@ export const listarSocios = async (req, res) => {
                 include: {
                     membresias: {
                         include: { plan: true },
-                        orderBy: { fechaFin: 'desc' },
+                        orderBy: { id: 'desc' },
                         take: 1
                     },
                     contratos: {
-                        orderBy: { fechaFin: 'desc' },
+                        orderBy: { id: 'desc' },
                         take: 1
                     }
                 }
@@ -281,7 +281,7 @@ export const listarSocios = async (req, res) => {
                     createdAt: true,
                     membresias: {
                         select: { fechaFin: true, status: true },
-                        orderBy: { fechaFin: 'desc' },
+                        orderBy: { id: 'desc' },
                         take: 1
                     }
                 }
@@ -359,8 +359,8 @@ export const obtenerSocio = async (req, res) => {
         const socio = await prisma.socio.findUnique({
             where: { id: parseInt(id) },
             include: {
-                membresias: { include: { plan: true }, orderBy: { fechaFin: 'desc' }, take: 1 },
-                contratos: { orderBy: { fechaFin: 'desc' }, take: 1 }
+                membresias: { include: { plan: true }, orderBy: { id: 'desc' }, take: 1 }, 
+                contratos: { orderBy: { id: 'desc' }, take: 1 } 
             }
         });
 
