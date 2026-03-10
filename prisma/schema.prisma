@@ -78,6 +78,7 @@ enum CorteCajaStatus {
 enum AccesoTipo {
   IN
   OUT
+  DENEGADO
 }
 
 enum ConceptoTipo {
@@ -749,6 +750,9 @@ model Acceso {
   motivo         String?      @db.VarChar(255)
   usuarioId      Int?         @map("usuario_id")
   dispositivoId  String?      @map("dispositivo_id") @db.VarChar(60)
+
+  estadoAcceso   String       @default("permitido") @map("estado_acceso") @db.VarChar(20)
+  motivoCodigo   String       @default("ok") @map("motivo_codigo") @db.VarChar(30)
   
   // CAMPOS BIOMÉTRICOS
   metodo         AccesoMetodo @default(facial)
