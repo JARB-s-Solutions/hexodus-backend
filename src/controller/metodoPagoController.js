@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.js";
-import { aHoraCampeche } from "../utils/dateHelper.js"; // 🔥 Importamos el ayudante
+import { aHoraCampeche } from "../utils/dateHelper.js"; // Importamos el ayudante
 
 // CREAR MÉTODO DE PAGO
 export const crearMetodoPago = async (req, res) => {
@@ -32,9 +32,9 @@ export const crearMetodoPago = async (req, res) => {
                 nombre: nuevoMetodo.nombre,
                 status: nuevoMetodo.status,
                 is_deleted: nuevoMetodo.isDeleted,
-                deleted_at: aHoraCampeche(nuevoMetodo.deletedAt), // 🔥 Formateamos a Campeche
+                deleted_at: aHoraCampeche(nuevoMetodo.deletedAt), // Formateamos a Campeche
                 create_by: nuevoMetodo.createdBy,
-                create_at: aHoraCampeche(nuevoMetodo.createdAt)   // 🔥 Formateamos a Campeche
+                create_at: aHoraCampeche(nuevoMetodo.createdAt)   // Formateamos a Campeche
             }
         });
 
@@ -57,9 +57,9 @@ export const listarMetodosPago = async (req, res) => {
             nombre: m.nombre,
             status: m.status,
             is_deleted: m.isDeleted,
-            deleted_at: aHoraCampeche(m.deletedAt), // 🔥 Formateamos a Campeche
+            deleted_at: aHoraCampeche(m.deletedAt), // Formateamos a Campeche
             create_by: m.createdBy,
-            create_at: aHoraCampeche(m.createdAt)   // 🔥 Formateamos a Campeche
+            create_at: aHoraCampeche(m.createdAt)   // Formateamos a Campeche
         }));
 
         res.status(200).json({
