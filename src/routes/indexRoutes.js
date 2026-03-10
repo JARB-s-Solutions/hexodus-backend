@@ -19,6 +19,7 @@ import usuarioRoutes from "./usuarioRoutes.js";
 import rolRoutes from "./rolRoutes.js";
 import auditoriaRoutes from "./auditoriaRoutes.js";
 import alertaRoutes from "./alertaRoutes.js";
+import backupRoutes from "./backupRoutes.js";
 
 const router = Router();
 
@@ -42,5 +43,6 @@ router.use("/usuarios", usuarioRoutes);
 router.use("/roles", rolRoutes);
 router.use("/auditoria", auditoriaRoutes);
 router.use("/alertas", alertaRoutes);
+router.use("/backups", backupRoutes);
 
 export default router;
