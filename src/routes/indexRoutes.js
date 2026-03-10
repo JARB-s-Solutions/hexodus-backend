@@ -18,6 +18,7 @@ import asistenciaRoutes from "./asistenciaRoutes.js";
 import usuarioRoutes from "./usuarioRoutes.js";
 import rolRoutes from "./rolRoutes.js";
 import auditoriaRoutes from "./auditoriaRoutes.js";
+import alertaRoutes from "./alertaRoutes.js";
 
 const router = Router();
 
@@ -40,5 +41,6 @@ router.use("/asistencia", asistenciaRoutes);
 router.use("/usuarios", usuarioRoutes);
 router.use("/roles", rolRoutes);
 router.use("/auditoria", auditoriaRoutes);
+router.use("/alertas", alertaRoutes);
 
 export default router;

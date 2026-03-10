@@ -104,6 +104,27 @@ enum AccesoMetodo {
   manual
 }
 
+enum AlertaTipo {
+  vencimiento_membresia
+  stock_bajo
+  inactividad_socio
+  pago_pendiente
+}
+
+enum AlertaEstado {
+  activa
+  vista
+  resuelta
+  descartada
+}
+
+enum AlertaPrioridad {
+  baja
+  media
+  alta
+  urgente
+}
+
 // ==========================================================
 // 1 y 2. MÓDULO: USUARIOS Y ROLES
 // ==========================================================
@@ -150,6 +171,8 @@ model Usuario {
   eliminacionesLogs    EliminacionLog[]     @relation("UsuarioEliminacion")
   movimientosCaja      CajaMovimiento[]     @relation("UsuarioCajaMov")
   reportesFinancieros  ReporteFinanciero[]  @relation("UsuarioReporte")
+  alertasVistas        AlertaSistema[] @relation("UsuarioAlertaVista")
+  alertasResueltas     AlertaSistema[] @relation("UsuarioAlertaResuelta")
 
   @@map("usuarios")
 }
@@ -226,6 +249,7 @@ model Socio {
   inscripciones   ClaseInscripcion[]
   accesos         Acceso[]
   ventas          Venta[]
+  alertas              AlertaSistema[]
 
   @@index([status])
   @@index([telefono])
@@ -314,6 +338,7 @@ model MembresiaSocio {
   plan               MembresiaPlan @relation(fields: [planId], references: [id])
   usuarioAsigna      Usuario?  @relation("UsuarioAsignaMembresia", fields: [asignadoPor], references: [id])
   pagos              PagoMembresia[]
+  alertas              AlertaSistema[]
 
   @@index([socioId, fechaFin])
   @@index([estadoPago])
@@ -439,6 +464,7 @@ model Producto {
   movimientos    InventarioMovimiento[]
   detallesCompra CompraDetalle[]
   detallesVenta  VentaDetalle[]
+  alertas              AlertaSistema[]
 
   @@map("productos")
 }
@@ -778,4 +804,64 @@ model IntentoAccesoFallido {
 
   @@index([fechaHora(sort: Desc)])
   @@map("intentos_acceso_fallidos")
+}
+
+// ==========================================================
+// 16. MÓDULO: ALERTAS Y NOTIFICACIONES
+// ==========================================================
+
+model AlertaSistema {
+  id               String          @id @default(uuid())
+  tipo             AlertaTipo
+  estado           AlertaEstado    @default(activa)
+  prioridad        AlertaPrioridad @default(media)
+  
+  titulo           String          @db.VarChar(255)
+  descripcion      String?         @db.Text
+  
+  // Relaciones
+  socioId          Int?            @map("socio_id")
+  productoId       Int?            @map("producto_id")
+  membresiaSocioId Int?            @map("membresia_socio_id")
+  
+  datosAdicionales Json?           @map("datos_adicionales")
+  
+  // Gestión de la alerta
+  vistaPorId       Int?            @map("vista_por_id")
+  fechaVista       DateTime?       @map("fecha_vista")
+  resueltaPorId    Int?            @map("resuelta_por_id")
+  fechaResolucion  DateTime?       @map("fecha_resolucion")
+  notasResolucion  String?         @map("notas_resolucion") @db.Text
+
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  socio            Socio?          @relation(fields: [socioId], references: [id])
+  producto         Producto?       @relation(fields: [productoId], references: [id])
+  membresiaSocio   MembresiaSocio? @relation(fields: [membresiaSocioId], references: [id])
+  vistaPor         Usuario?        @relation("UsuarioAlertaVista", fields: [vistaPorId], references: [id])
+  resueltaPor      Usuario?        @relation("UsuarioAlertaResuelta", fields: [resueltaPorId], references: [id])
+
+  @@index([estado])
+  @@index([tipo])
+  @@map("alertas_sistema")
+}
+
+model ConfiguracionAlerta {
+  id                       String   @id @default(uuid())
+  
+  alertaVencimientosActiva Boolean  @default(true) @map("alerta_vencimientos_activa")
+  alertaVencimientosDias   Int      @default(7) @map("alerta_vencimientos_dias")
+  
+  alertaStockActiva        Boolean  @default(true) @map("alerta_stock_activa")
+  alertaStockMinimo        Int      @default(10) @map("alerta_stock_minimo")
+  
+  alertaInactividadActiva  Boolean  @default(true) @map("alerta_inactividad_activa")
+  alertaInactividadDias    Int      @default(15) @map("alerta_inactividad_dias")
+  
+  alertaPagosActiva        Boolean  @default(true) @map("alerta_pagos_activa")
+  
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("configuracion_alertas")
 }
