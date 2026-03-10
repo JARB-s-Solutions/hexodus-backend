@@ -2,7 +2,8 @@ import { Router } from "express";
 import { 
     crearBackup, 
     obtenerHistorialBackups, 
-    descargarBackup 
+    descargarBackup,
+    restaurarBackup
 } from "../controller/backupController.js";
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
@@ -13,5 +14,6 @@ router.use(verificarToken);
 router.post("/", verificarPermiso("configuracion", "editar"), crearBackup);
 router.get("/", verificarPermiso("configuracion", "ver"), obtenerHistorialBackups);
 router.get("/descargar/:fileName", verificarPermiso("configuracion", "ver"), descargarBackup);
+router.post("/restaurar", verificarPermiso("configuracion", "editar"), restaurarBackup);
 
 export default router;

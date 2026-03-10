@@ -132,3 +132,84 @@ export const descargarBackup = async (req, res) => {
         res.status(500).json({ success: false, message: "No se pudo generar el link de descarga." });
     }
 };
+
+
+// RESTAURAR UN BACKUP 
+export const restaurarBackup = async (req, res) => {
+    try {
+        const { archivo } = req.body || {};
+        const usuarioId = req.user?.id;
+
+        if (!archivo) {
+            return res.status(400).json({ success: false, message: "Debes proporcionar el archivo a restaurar." });
+        }
+
+        const { data: fileData, error: downloadError } = await supabase.storage
+            .from('backups')
+            .download(archivo);
+
+        if (downloadError) throw new Error(`Error en descarga: ${downloadError.message}`);
+
+        const textData = await fileData.text();
+        const snapshot = JSON.parse(textData);
+        const datos = snapshot.datos;
+
+        if (!datos) return res.status(400).json({ success: false, message: "Archivo corrupto." });
+
+        // 3. Restauración con UPSERT 
+        await prisma.$transaction(async (tx) => {
+            
+            // A) Restaurar Planes de Membresía
+            if (datos.membresiasPlanes) {
+                for (const plan of datos.membresiasPlanes) {
+                    await tx.membresiaPlan.upsert({ where: { id: plan.id }, update: plan, create: plan });
+                }
+            }
+
+            // B) Restaurar Productos
+            if (datos.productos) {
+                for (const prod of datos.productos) {
+                    await tx.producto.upsert({ where: { id: prod.id }, update: prod, create: prod });
+                }
+            }
+
+            // C) Restaurar Socios
+            if (datos.socios) {
+                for (const socio of datos.socios) {
+                    await tx.socio.upsert({ where: { id: socio.id }, update: socio, create: socio });
+                }
+            }
+
+            // D) Restaurar Membresías Asignadas
+            if (datos.membresiasSocios) {
+                for (const mem of datos.membresiasSocios) {
+                    await tx.membresiaSocio.upsert({ where: { id: mem.id }, update: mem, create: mem });
+                }
+            }
+
+            // E) Restaurar Accesos (Bitácora de entradas)
+            if (datos.accesos) {
+                await tx.acceso.deleteMany({});
+                await tx.acceso.createMany({ data: datos.accesos });
+            }
+        }, {
+            maxWait: 10000, // Le damos más tiempo a la base de datos por si el archivo es grande
+            timeout: 20000
+        });
+
+        // 4. Registrar éxito
+        const backupOriginal = await prisma.backupLog.findFirst({ where: { archivo: archivo } });
+        if (backupOriginal && usuarioId) {
+            await prisma.restoreLog.create({ data: { backupId: backupOriginal.id, restauradoPor: usuarioId, status: 'exitoso' }});
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "¡Base de datos restaurada con éxito! El gimnasio ha regresado al estado del backup."
+        });
+
+    } catch (error) {
+        console.error("Error crítico al restaurar:", error);
+        res.status(500).json({ success: false, message: "Restauración abortada por seguridad.", detalle: error.message });
+    }
+};
