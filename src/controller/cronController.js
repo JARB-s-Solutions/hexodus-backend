@@ -38,12 +38,9 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
             });
             
             for (const prod of productos) {
-                // Si el producto no tiene registro de stock aún, lo saltamos
-                if (!prod.stock) continue; 
-
-                // Ahora leemos de 'prod.stock.stockMinimo' y 'prod.stock.cantidad'
-                const umbral = (prod.stock.stockMinimo > 0) ? prod.stock.stockMinimo : config.alertaStockMinimo;
-                const cantidadActual = prod.stock.cantidad;
+                // Si no tiene registro de stock, tiene 0 unidades.
+                const umbral = (prod.stock && prod.stock.stockMinimo > 0) ? prod.stock.stockMinimo : config.alertaStockMinimo;
+                const cantidadActual = prod.stock ? prod.stock.cantidad : 0;
                 
                 if (cantidadActual <= umbral) {
                     const existe = await prisma.alertaSistema.findFirst({
