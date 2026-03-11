@@ -19,7 +19,8 @@ router.use(verificarToken);
 router.post("/abrir", verificarPermiso("ventas", "crearCorte"), abrirCaja);
 
 // Ruta para consultar el corte actual / movimientos flotantes
-router.post("/consultar", verificarPermiso("ventas", "verCortesAnteriores"), consultarCorte);
+// Solo requiere token válido - todos los usuarios autenticados deben poder saber si la caja está abierta
+router.post("/consultar", consultarCorte);
 
 // Ruta para cerrar/realizar el corte
 router.post("/cerrar", verificarPermiso("ventas", "crearCorte"), realizarCorte);
