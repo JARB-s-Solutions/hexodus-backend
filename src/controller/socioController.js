@@ -229,10 +229,18 @@ export const crearSocio = async (req, res) => {
 // LISTAR TODOS LOS SOCIOS 
 export const listarSocios = async (req, res) => {
     try {
+        const DEFAULT_LIMIT = 25;
+        const MAX_LIMIT = 200;
+
         const page = Math.max(parseInt(req.query.page) || 1, 1);
-        const limitParam = req.query.limit;
-        const limit = limitParam ? parseInt(limitParam) : null;
-        const shouldPaginate = Number.isInteger(limit) && limit > 0;
+        const rawLimit = req.query.limit;
+        const shouldPaginate = rawLimit !== 'all';
+
+        const parsedLimit = parseInt(rawLimit, 10);
+        const limit = shouldPaginate
+            ? (Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_LIMIT) : DEFAULT_LIMIT)
+            : null;
+
         const skip = shouldPaginate ? (page - 1) * limit : 0;
 
         const { search, estado } = req.query;
@@ -343,7 +351,8 @@ export const listarSocios = async (req, res) => {
                 current_page: page,
                 limit: shouldPaginate ? limit : totalRecords,
                 total_records: totalRecords,
-                total_pages: shouldPaginate ? Math.ceil(totalRecords / limit) : 1
+                total_pages: shouldPaginate ? Math.ceil(totalRecords / limit) : 1,
+                paginated: shouldPaginate
             }
         });
 
