@@ -229,9 +229,11 @@ export const crearSocio = async (req, res) => {
 // LISTAR TODOS LOS SOCIOS 
 export const listarSocios = async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 25;
-        const skip = (page - 1) * limit;
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limitParam = req.query.limit;
+        const limit = limitParam ? parseInt(limitParam) : null;
+        const shouldPaginate = Number.isInteger(limit) && limit > 0;
+        const skip = shouldPaginate ? (page - 1) * limit : 0;
 
         const { search, estado } = req.query;
 
@@ -260,8 +262,7 @@ export const listarSocios = async (req, res) => {
             prisma.socio.count({ where: whereClause }),
             prisma.socio.findMany({ 
                 where: whereClause,
-                skip: skip,
-                take: limit,
+                ...(shouldPaginate ? { skip, take: limit } : {}),
                 orderBy: { createdAt: 'desc' },
                 include: {
                     membresias: {
@@ -338,7 +339,12 @@ export const listarSocios = async (req, res) => {
             message: "Lista de socios obtenida correctamente",
             dashboard_stats: dashboard_stats, 
             data: dataFormateada,            
-            pagination: { current_page: page, limit: limit, total_records: totalRecords, total_pages: Math.ceil(totalRecords / limit) }
+            pagination: {
+                current_page: page,
+                limit: shouldPaginate ? limit : totalRecords,
+                total_records: totalRecords,
+                total_pages: shouldPaginate ? Math.ceil(totalRecords / limit) : 1
+            }
         });
 
     } catch (error) {
