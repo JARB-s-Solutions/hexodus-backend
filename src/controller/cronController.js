@@ -31,12 +31,21 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
 
         // A) ALERTAS DE STOCK BAJO
         if (config.alertaStockActiva) {
-            const productos = await prisma.producto.findMany({ where: { isDeleted: false, status: 'activo' } });
+            // Hacemos un include de 'stock' para traer los datos de la tabla InventarioStock
+            const productos = await prisma.producto.findMany({ 
+                where: { isDeleted: false, status: 'activo' },
+                include: { stock: true } 
+            });
+            
             for (const prod of productos) {
-                // Usa el stock mínimo específico del producto si existe, o el global si no
-                const umbral = (prod.stockMinimo && prod.stockMinimo > 0) ? prod.stockMinimo : config.alertaStockMinimo;
+                // Si el producto no tiene registro de stock aún, lo saltamos
+                if (!prod.stock) continue; 
+
+                // Ahora leemos de 'prod.stock.stockMinimo' y 'prod.stock.cantidad'
+                const umbral = (prod.stock.stockMinimo > 0) ? prod.stock.stockMinimo : config.alertaStockMinimo;
+                const cantidadActual = prod.stock.cantidad;
                 
-                if (prod.stock <= umbral) {
+                if (cantidadActual <= umbral) {
                     const existe = await prisma.alertaSistema.findFirst({
                         where: { tipo: 'stock_bajo', estado: 'activa', productoId: prod.id }
                     });
@@ -45,9 +54,9 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
                         await prisma.alertaSistema.create({
                             data: {
                                 tipo: 'stock_bajo',
-                                prioridad: prod.stock === 0 ? 'urgente' : 'alta',
+                                prioridad: cantidadActual === 0 ? 'urgente' : 'alta',
                                 titulo: `Stock crítico: ${prod.nombre}`,
-                                descripcion: `Quedan ${prod.stock} unidades en inventario. Umbral de alerta: ${umbral}.`,
+                                descripcion: `Quedan ${cantidadActual} unidades en inventario. Umbral de alerta: ${umbral}.`,
                                 productoId: prod.id
                             }
                         });
