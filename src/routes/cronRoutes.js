@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { ejecutarMantenimientoDiario } from "../controller/cronController.js";
+import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
 const router = Router();
 // Se protege con el CRON_SECRET en los headers.
