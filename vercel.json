@@ -15,7 +15,7 @@
   "crons": [
     {
       "path": "/api/cron/mantenimiento-diario",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 2 * * *"
     }
   ]
 }
