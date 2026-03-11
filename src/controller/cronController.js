@@ -2,11 +2,17 @@ import prisma from "../config/prisma.js";
 
 export const ejecutarMantenimientoDiario = async (req, res) => {
     try {
-        const authHeader = req.headers.authorization;
-        const cronSecret = process.env.CRON_SECRET;
+        // ¿Viene del frontend con un token JWT válido?
+        const esAdminManual = req.user && req.user.id;
 
-        if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-            return res.status(401).json({ error: "No autorizado. Solo ejecución automatizada." });
+        // Si NO es un admin manual, entonces debe ser el bot de Vercel. Validamos su secreto.
+        if (!esAdminManual) {
+            const authHeader = req.headers.authorization;
+            const cronSecret = process.env.CRON_SECRET;
+
+            if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+                return res.status(401).json({ error: "No autorizado. Solo ejecución automatizada o administradores." });
+            }
         }
 
         const hoy = new Date();
