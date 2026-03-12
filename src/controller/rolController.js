@@ -138,7 +138,28 @@ export const eliminarRol = async (req, res) => {
             });
         }
 
-        await prisma.rol.delete({ where: { id } });
+        // REGLA 3: Reasignar usuarios bloqueados que aún tengan este rol
+        // (rolId es NOT NULL en el schema, por lo que el DELETE fallaría con FK constraint
+        //  si hay usuarios bloqueados asignados a este rol)
+        const rolFallback = await prisma.rol.findFirst({
+            where: { esSistema: true, id: { not: id } },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        if (!rolFallback) {
+            return res.status(500).json({ 
+                success: false, 
+                error: { message: "No se encontró un rol de sistema de respaldo para reasignar usuarios bloqueados." } 
+            });
+        }
+
+        await prisma.$transaction([
+            prisma.usuario.updateMany({
+                where: { rolId: id, status: 'bloqueado' },
+                data: { rolId: rolFallback.id }
+            }),
+            prisma.rol.delete({ where: { id } })
+        ]);
 
         res.status(200).json({
             success: true,
