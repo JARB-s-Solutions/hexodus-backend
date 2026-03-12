@@ -726,12 +726,12 @@ export const eliminarSocio = async (req, res) => {
         });
 
         await registrarLog({
-        req,
-        accion: 'eliminar',
-        modulo: 'socios',
-        registroId: socioId,
-        detalles: `Socio dado de baja del gimnasio`
-    });
+            req,
+            accion: 'eliminar',
+            modulo: 'socios',
+            registroId: socioId,
+            detalles: `Socio "${socioExistente.nombreCompleto}" (#${socioExistente.codigoSocio}) fue dado de baja del gimnasio`
+        });
 
         res.status(200).json({ message: "Socio eliminado correctamente del sistema." });
 
@@ -809,6 +809,7 @@ export const pagarMembresiaPendiente = async (req, res) => {
             return res.status(400).json({ error: "Faltan datos obligatorios." });
         }
 
+        let datosMembresia = {};
         await prisma.$transaction(async (tx) => {
             const cajaAbierta = await tx.corteCaja.findFirst({ where: { status: 'abierto' } });
             if (!cajaAbierta) throw new Error("CAJA_CERRADA");
@@ -835,6 +836,8 @@ export const pagarMembresiaPendiente = async (req, res) => {
             }
 
             if (membresia.estadoPago === 'pagado') throw new Error("UX_ERROR:Esta membresía ya se encuentra pagada.");
+
+            datosMembresia = { nombreSocio: membresia.socio?.nombreCompleto ?? 'Socio', codigoSocio: membresia.socio?.codigoSocio ?? '', precio: membresia.precioCongelado };
 
             const metodoPagoIdValido = await validarMetodoPago(tx, metodo_pago_id);
 
@@ -876,8 +879,8 @@ export const pagarMembresiaPendiente = async (req, res) => {
             req,
             accion: 'pagar',
             modulo: 'socios',
-            registroId: socioId, // ID del socio
-            detalles: `Se procesó un pago de membresía pendiente`
+            registroId: socioId,
+            detalles: `Pago de membresía pendiente registrado para "${datosMembresia.nombreSocio}" (#${datosMembresia.codigoSocio}) — Monto: $${datosMembresia.precio}`
         });
 
         res.status(200).json({ message: "Pago registrado correctamente en caja." });
@@ -901,6 +904,7 @@ export const renovarMembresia = async (req, res) => {
             return res.status(400).json({ error: "El socio y el plan son obligatorios para renovar." });
         }
 
+        let datosRenovacion = {};
         await prisma.$transaction(async (tx) => {
             const socio = await tx.socio.findUnique({ where: { id: socioId, isDeleted: false } });
             if (!socio) throw new Error("NOT_FOUND:Socio no encontrado.");
@@ -964,6 +968,8 @@ export const renovarMembresia = async (req, res) => {
                     nota: `Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
                 }
             });
+
+            datosRenovacion = { nombreSocio: socio.nombreCompleto, codigoSocio: socio.codigoSocio, nombrePlan: plan.nombre, precio: precioFinal };
         });
 
         await registrarLog({
@@ -971,7 +977,7 @@ export const renovarMembresia = async (req, res) => {
             accion: 'renovar',
             modulo: 'socios',
             registroId: socioId,
-            detalles: `Se renovó la membresía del socio`
+            detalles: `Membresía de "${datosRenovacion.nombreSocio}" (#${datosRenovacion.codigoSocio}) renovada al plan "${datosRenovacion.nombrePlan}" por $${datosRenovacion.precio}`
         });
 
         res.status(201).json({ message: "Membresía renovada y cobrada exitosamente." });

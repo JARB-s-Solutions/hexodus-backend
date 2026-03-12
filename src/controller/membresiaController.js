@@ -323,7 +323,7 @@ export const editarMembresia = async (req, res) => {
             accion: 'editar',
             modulo: 'membresias',
             registroId: id,
-            detalles: `Se modificaron las condiciones o el precio del plan de membresía`
+            detalles: `Se editó el plan de membresía "${membresiaActualizada.nombre}" — Precio base: $${precioBase}${esOferta ? ` | Precio oferta: $${precioOferta}` : ''}`
         });
 
         res.status(200).json({
