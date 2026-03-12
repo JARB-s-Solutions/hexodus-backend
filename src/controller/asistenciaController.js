@@ -252,6 +252,7 @@ export const obtenerAsistenciasHoy = async (req, res) => {
 
             return {
                 id: a.id,
+                socio_id: a.socioId,
                 socio_nombre: a.socio.nombreCompleto,
                 codigo_socio: a.socio.codigoSocio,
                 foto_perfil_url: a.socio.fotoUrl,
