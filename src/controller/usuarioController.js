@@ -280,7 +280,7 @@ export const actualizarUsuario = async (req, res) => {
     }
 };
 
-// 5. DESACTIVAR USUARIO (Soft Delete) 
+// 5. DESACTIVAR USUARIO (Soft Delete + Liberación de Credenciales) 
 export const eliminarUsuario = async (req, res) => {
     try {
         const { id } = req.params;
@@ -295,10 +295,21 @@ export const eliminarUsuario = async (req, res) => {
             return res.status(403).json({ success: false, error: { message: "No puedes desactivar tu propia cuenta activa" } });
         }
 
-        // Hacemos "Soft Delete" (solo lo pasamos a inactivo para no romper el historial de ventas o cajas asociadas a él)
+        // Creamos un sufijo único basado en la fecha actual (ej. _del_1710255871000)
+        const timestampSufijo = `_del_${Date.now()}`;
+        
+        // Recortamos el original por si es muy largo para no romper el límite del VarChar en BD
+        const emailLiberado = `${usuario.email.substring(0, 130)}${timestampSufijo}`;
+        const usernameLiberado = `${usuario.username.substring(0, 30)}${timestampSufijo}`;
+
+        // Hacemos "Soft Delete" y liberamos las credenciales
         await prisma.usuario.update({
             where: { uid: id },
-            data: { status: 'bloqueado' }
+            data: { 
+                status: 'bloqueado',
+                email: emailLiberado,
+                username: usernameLiberado
+            }
         });
 
         await registrarLog({
@@ -306,12 +317,12 @@ export const eliminarUsuario = async (req, res) => {
             accion: 'eliminar',
             modulo: 'usuarios',
             registroId: id,
-            detalles: `El usuario "${usuario.nombreCompleto}" (@${usuario.username}) fue desactivado del sistema`
+            detalles: `El usuario "${usuario.nombreCompleto}" (@${usuario.username}) fue desactivado del sistema y sus credenciales liberadas.`
         });
 
         res.status(200).json({
             success: true,
-            message: "Usuario eliminado exitosamente."
+            message: "Usuario eliminado exitosamente y sus credenciales han sido liberadas."
         });
 
     } catch (error) {
