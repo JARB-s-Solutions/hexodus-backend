@@ -98,19 +98,43 @@ export const consultarCorte = async (req, res) => {
             include: { movimientos: { include: { concepto: true } } }
         });
 
-        // Buscar TODOS los movimientos en ese rango de fechas 
-        // (Atrapamos los que hicimos en Ventas y Compras que aún no tienen corteId)
-        const movimientos = await prisma.cajaMovimiento.findMany({
-            where: {
-                fecha: { gte: inicio, lte: fin },
-                OR: [
-                    { corteId: null }, // Movimientos huérfanos (ventas/compras)
-                    { corteId: cajaAbierta ? cajaAbierta.id : -1 } // O los que ya son de esta caja
-                ]
-            },
-            include: { concepto: true, usuario: { select: { nombreCompleto: true } } },
-            orderBy: { fecha: 'asc' }
-        });
+        // Movimientos del corte activo + huérfanos del MISMO turno (evita mezclar históricos)
+        let movimientos = [];
+
+        if (cajaAbierta) {
+            const inicioTurno = new Date(Math.max(inicio.getTime(), new Date(cajaAbierta.inicio).getTime()));
+
+            const [movimientosCorte, movimientosHuerfanosTurno] = await Promise.all([
+                prisma.cajaMovimiento.findMany({
+                    where: {
+                        fecha: { gte: inicio, lte: fin },
+                        corteId: cajaAbierta.id
+                    },
+                    include: { concepto: true, usuario: { select: { nombreCompleto: true } } },
+                    orderBy: { fecha: 'asc' }
+                }),
+                prisma.cajaMovimiento.findMany({
+                    where: {
+                        fecha: { gte: inicioTurno, lte: fin },
+                        corteId: null
+                    },
+                    include: { concepto: true, usuario: { select: { nombreCompleto: true } } },
+                    orderBy: { fecha: 'asc' }
+                })
+            ]);
+
+            movimientos = [...movimientosCorte, ...movimientosHuerfanosTurno]
+                .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+        } else {
+            movimientos = await prisma.cajaMovimiento.findMany({
+                where: {
+                    fecha: { gte: inicio, lte: fin },
+                    corteId: null
+                },
+                include: { concepto: true, usuario: { select: { nombreCompleto: true } } },
+                orderBy: { fecha: 'asc' }
+            });
+        }
 
         // Calcular la matemática para tus 4 tarjetas
         let totalIngresos = 0;
@@ -175,8 +199,12 @@ export const realizarCorte = async (req, res) => {
             return res.status(400).json({ error: "No hay ninguna caja abierta para cerrar." });
         }
 
-        const inicio = new Date(fecha_inicial);
-        const fin = new Date(fecha_final);
+        const inicioSolicitado = fecha_inicial ? new Date(fecha_inicial) : null;
+        const fin = fecha_final ? new Date(fecha_final) : new Date();
+
+        const inicio = inicioSolicitado && !isNaN(inicioSolicitado)
+            ? new Date(Math.max(inicioSolicitado.getTime(), new Date(cajaAbierta.inicio).getTime()))
+            : new Date(cajaAbierta.inicio);
 
         // Transacción Maestra con tiempo extendido por si hay cientos de ventas
         const resultado = await prisma.$transaction(async (tx) => {

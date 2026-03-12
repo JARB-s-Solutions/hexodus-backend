@@ -133,13 +133,21 @@ export const crearVenta = async (req, res) => {
                     }
                 });
 
-                // Descontar del Inventario y dejar bitácora
-                const stockActual = productosDB.find(p => p.id === detalle.productoId).stock;
-                
-                await tx.inventarioStock.update({
-                    where: { productoId: detalle.productoId },
-                    data: { cantidad: stockActual.cantidad - detalle.cantidad } // Ahora esto NUNCA sumará por accidente
+                // Descontar del Inventario de forma atómica para evitar carreras de stock
+                const descuentoStock = await tx.inventarioStock.updateMany({
+                    where: {
+                        productoId: detalle.productoId,
+                        cantidad: { gte: detalle.cantidad }
+                    },
+                    data: {
+                        cantidad: { decrement: detalle.cantidad }
+                    }
                 });
+
+                if (descuentoStock.count === 0) {
+                    const producto = productosDB.find(p => p.id === detalle.productoId);
+                    throw new Error(`STOCK_CONFLICT:Stock insuficiente para '${producto?.nombre || 'producto'}'. Intenta refrescar el carrito.`);
+                }
 
                 await tx.inventarioMovimiento.create({
                     data: {
@@ -199,6 +207,9 @@ export const crearVenta = async (req, res) => {
 
     } catch (error) {
         console.error("Error al procesar la venta:", error);
+        if (error.message?.startsWith("STOCK_CONFLICT:")) {
+            return res.status(400).json({ error: error.message.replace("STOCK_CONFLICT:", "") });
+        }
         res.status(500).json({ error: "Error interno al procesar la venta." });
     }
 };
