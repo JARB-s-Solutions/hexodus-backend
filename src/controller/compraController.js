@@ -111,6 +111,7 @@ export const registrarCompra = async (req, res) => {
 
             await tx.cajaMovimiento.create({
                 data: {
+                    corteId: cajaAbierta.id,
                     usuarioId: req.user.id,
                     conceptoId: conceptoCompra.id,
                     tipo: 'gasto', 

@@ -6,6 +6,7 @@ const mapaPeriodos = {
     'este mes': 'Este Mes',
     'este trimestre': 'Este Trimestre',
     'este semestre': 'Este Semestre',
+    'este año': 'Este Ano',
     'este ano': 'Este Ano',
     'personalizado': 'Personalizado'
 };
@@ -15,6 +16,7 @@ const mapaVistas = {
     'ventas': 'Ventas',
     'gastos': 'Gastos',
     'utilidad': 'Utilidad',
+    'membresías': 'Membresias',
     'membresias': 'Membresias'
 };
 
@@ -86,7 +88,7 @@ export const obtenerResumenFinanciero = async (req, res) => {
         // B. CONSULTAS A LA BD
         const [
             ingresosActual, gastosActual, membresiasActual, ventasActual,
-            ingresosAnterior, gastosAnterior, membresiasAnterior,
+            ingresosAnterior, gastosAnterior, membresiasAnterior, ventasAnterior,
             sociosActivos, transaccionesVentas, transaccionesGastos,
             movimientosGastos, membresiasPeriodo
         ] = await Promise.all([
@@ -98,6 +100,7 @@ export const obtenerResumenFinanciero = async (req, res) => {
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', fecha: { gte: gteAnterior, lte: lteAnterior } }, _sum: { monto: true } }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'gasto', fecha: { gte: gteAnterior, lte: lteAnterior } }, _sum: { monto: true } }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', referenciaTipo: 'membresia', fecha: { gte: gteAnterior, lte: lteAnterior } }, _sum: { monto: true } }),
+            prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', referenciaTipo: 'venta', fecha: { gte: gteAnterior, lte: lteAnterior } }, _sum: { monto: true } }),
 
             prisma.membresiaSocio.count({ where: { status: 'activa', fechaFin: { gte: new Date() } } }),
             prisma.cajaMovimiento.count({ where: { tipo: 'ingreso', referenciaTipo: 'venta', fecha: { gte: gteActual, lte: lteActual } } }),
@@ -123,6 +126,7 @@ export const obtenerResumenFinanciero = async (req, res) => {
         const antGastos = parseTotal(gastosAnterior);
         const antUtilidad = antIngresos - antGastos;
         const antMembresias = parseTotal(membresiasAnterior);
+        const antVentas = parseTotal(ventasAnterior);
 
         const kpis_superiores = {
             ingresos: { total: totIngresos, porcentaje: calcularPorcentaje(totIngresos, antIngresos) },
@@ -139,7 +143,7 @@ export const obtenerResumenFinanciero = async (req, res) => {
             total_ingresos: totIngresos,
             saldo_neto: totUtilidad,
             grafica: {
-                ventas: { total: totVentas, porcentaje_grafica: Number(pctVentas), porcentaje_vs_anterior: calcularPorcentaje(totVentas, antIngresos - antMembresias) },
+                ventas: { total: totVentas, porcentaje_grafica: Number(pctVentas), porcentaje_vs_anterior: calcularPorcentaje(totVentas, antVentas) },
                 membresias: { total: totMembresias, porcentaje_grafica: Number(pctMembresias), porcentaje_vs_anterior: calcularPorcentaje(totMembresias, antMembresias) }
             }
         };
@@ -150,8 +154,8 @@ export const obtenerResumenFinanciero = async (req, res) => {
             ventas: {
                 mostrar: ['Reporte Completo', 'Ventas'].includes(tipo_reporte),
                 total: totVentas, transacciones: transaccionesVentas,
-                porcentaje_vs_anterior: calcularPorcentaje(totVentas, antIngresos - antMembresias),
-                anterior_texto: `$${(antIngresos - antMembresias).toLocaleString('en-US')}`
+                porcentaje_vs_anterior: calcularPorcentaje(totVentas, antVentas),
+                anterior_texto: `$${antVentas.toLocaleString('en-US')}`
             },
             gastos: {
                 mostrar: ['Reporte Completo', 'Gastos'].includes(tipo_reporte),
