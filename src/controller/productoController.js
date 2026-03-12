@@ -406,7 +406,7 @@ export const actualizarProducto = async (req, res) => {
             accion: 'editar',
             modulo: 'inventario',
             registroId: id,
-            detalles: `Se modificaron los datos o el precio del producto`
+            detalles: `Se modificaron los datos del producto "${productoExistente.nombre}" (Código: ${productoExistente.codigo})${huboAjuste ? ` — Stock ajustado: de ${productoExistente.stock?.cantidad ?? '?'} a ${(productoExistente.stock?.cantidad ?? 0) + diferencia}` : ''}`
         });
 
         res.status(200).json({
@@ -490,10 +490,10 @@ export const ajustarStock = async (req, res) => {
 
         await registrarLog({
             req,
-            accion: 'ajustarStock',
+            accion: 'ajustarstock',
             modulo: 'inventario',
-            registroId: id, // ID del producto
-            detalles: `Ajuste de stock realizado. Motivo: ${nota || 'No especificado'}. Nuevo stock: ${nuevoStock}`
+            registroId: id,
+            detalles: `Stock de "${producto.nombre}" ajustado de ${stockActual} a ${nuevoStock} (${ajuste > 0 ? '+' : ''}${ajuste}). Motivo: ${nota || 'No especificado'}`
         });
 
         res.status(200).json({

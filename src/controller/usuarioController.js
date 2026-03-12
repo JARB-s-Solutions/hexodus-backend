@@ -257,8 +257,8 @@ export const actualizarUsuario = async (req, res) => {
             req,
             accion: 'editar',
             modulo: 'usuarios',
-            registroId: id, // ID del usuario editado
-            detalles: `Se modificaron los datos/rol del usuario con ID: ${id}`
+            registroId: id,
+            detalles: `Se editaron los datos del usuario "${usuarioActualizado.nombreCompleto}" (@${usuarioActualizado.username}) — Rol asignado: ${usuarioActualizado.rol.nombre}`
         });
 
         res.status(200).json({
@@ -306,7 +306,7 @@ export const eliminarUsuario = async (req, res) => {
             accion: 'eliminar',
             modulo: 'usuarios',
             registroId: id,
-            detalles: `Usuario dado de baja del sistema`
+            detalles: `El usuario "${usuario.nombreCompleto}" (@${usuario.username}) fue desactivado del sistema`
         });
 
         res.status(200).json({
