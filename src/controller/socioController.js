@@ -662,6 +662,13 @@ export const actualizarSocio = async (req, res) => {
                         await registrarCobro(nuevaMembresia.id, precioFinal, `Suscripción de membresía asignada. Socio: ${socioExistente.codigoSocio}`);
                     }
                 }
+
+                if (estadoPagoUI === 'pagado') {
+                    await tx.socio.update({
+                        where: { id: socioId },
+                        data: { status: 'activo' }
+                    });
+                }
             }
         }, {
             maxWait: 5000,
@@ -873,6 +880,12 @@ export const pagarMembresiaPendiente = async (req, res) => {
                 where: { id: membresia.id },
                 data: { estadoPago: 'pagado' }
             });
+
+            // 4. Reactivar socio al quedar al corriente
+            await tx.socio.update({
+                where: { id: socioId },
+                data: { status: 'activo' }
+            });
         });
 
         await registrarLog({
@@ -967,6 +980,11 @@ export const renovarMembresia = async (req, res) => {
                     referenciaId: nuevaMembresia.id,
                     nota: `Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
                 }
+            });
+
+            await tx.socio.update({
+                where: { id: socio.id },
+                data: { status: 'activo' }
             });
 
             datosRenovacion = { nombreSocio: socio.nombreCompleto, codigoSocio: socio.codigoSocio, nombrePlan: plan.nombre, precio: precioFinal };
