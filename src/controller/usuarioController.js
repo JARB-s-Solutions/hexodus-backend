@@ -213,12 +213,13 @@ export const actualizarUsuario = async (req, res) => {
 
         // 1. Validar que el nuevo correo/username no estén tomados por otro usuario
         if (email || username) {
+            const filtrosDuplicado = [];
+            if (email) filtrosDuplicado.push({ email });
+            if (username) filtrosDuplicado.push({ username });
+
             const duplicado = await prisma.usuario.findFirst({
                 where: {
-                    OR: [
-                        email ? { email } : {},
-                        username ? { username } : {}
-                    ],
+                    OR: filtrosDuplicado,
                     NOT: { uid: id } // Excluimos al usuario que estamos editando
                 }
             });
@@ -237,7 +238,13 @@ export const actualizarUsuario = async (req, res) => {
         if (email) dataUpdate.email = email;
         if (username) dataUpdate.username = username;
         if (telefono !== undefined) dataUpdate.telefono = telefono;
-        if (rolId) dataUpdate.rolId = rolId;
+        if (rolId) {
+            const rolExistente = await prisma.rol.findUnique({ where: { id: rolId } });
+            if (!rolExistente) {
+                return res.status(404).json({ success: false, error: { message: "El rol especificado no existe" } });
+            }
+            dataUpdate.rolId = rolId;
+        }
         if (activo !== undefined) dataUpdate.status = activo ? 'activo' : 'inactivo';
 
         // 3. Si mandó contraseña nueva, la hasheamos
