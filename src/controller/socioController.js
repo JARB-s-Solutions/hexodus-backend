@@ -554,7 +554,13 @@ export const actualizarSocio = async (req, res) => {
                     fechaFinReal.setDate(fechaFinReal.getDate() + planNuevo.duracionDias);
                 }
 
-                const metodoPagoIdValido = await validarMetodoPago(tx, membresia.metodo_pago_id);
+                let metodoPagoIdValidoCache = null;
+                const obtenerMetodoPagoIdValido = async () => {
+                    if (!metodoPagoIdValidoCache) {
+                        metodoPagoIdValidoCache = await validarMetodoPago(tx, membresia.metodo_pago_id);
+                    }
+                    return metodoPagoIdValidoCache;
+                };
 
                 const registrarCobro = async (membresiaId, monto, nota) => {
                     if (monto <= 0) return; // 🔥 ESCUDO: No registrar cobros de $0
@@ -563,7 +569,7 @@ export const actualizarSocio = async (req, res) => {
                     await tx.pagoMembresia.create({
                         data: {
                             membresiaSocioId: membresiaId,
-                            metodoPagoId: metodoPagoIdValido,
+                            metodoPagoId: await obtenerMetodoPagoIdValido(),
                             monto: monto,
                             recibidoPor: req.user.id
                         }
@@ -588,7 +594,7 @@ export const actualizarSocio = async (req, res) => {
                     await tx.pagoMembresia.create({
                         data: {
                             membresiaSocioId: membresiaId,
-                            metodoPagoId: metodoPagoIdValido, 
+                            metodoPagoId: await obtenerMetodoPagoIdValido(), 
                             monto: -Math.abs(monto), // Forzamos el monto a negativo
                             recibidoPor: req.user.id
                         }
