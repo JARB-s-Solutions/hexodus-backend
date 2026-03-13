@@ -45,15 +45,17 @@ export const crearRol = async (req, res) => {
             return res.status(400).json({ success: false, error: { message: "El ID y el nombre son obligatorios" } });
         }
 
+        const idNormalizado = id.toLowerCase().trim().replace(/\s+/g, '_');
+
         // Verificar que el ID del rol no exista (ej. 'recepcionista')
-        const rolExistente = await prisma.rol.findUnique({ where: { id } });
+        const rolExistente = await prisma.rol.findUnique({ where: { id: idNormalizado } });
         if (rolExistente) {
             return res.status(400).json({ success: false, error: { message: "Ya existe un rol con este ID" } });
         }
 
         const nuevoRol = await prisma.rol.create({
             data: {
-                id: id.toLowerCase().replace(/\s+/g, '_'), // Normalizamos el ID (ej. "Caja Principal" -> "caja_principal")
+                id: idNormalizado, // Normalizamos el ID (ej. "Caja Principal" -> "caja_principal")
                 nombre,
                 descripcion,
                 color,
