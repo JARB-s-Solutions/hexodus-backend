@@ -29,6 +29,36 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
             })
         ]);
 
+        // Socio con membresía vigente vuelve a activo automáticamente
+        const sociosReactivados = await prisma.socio.updateMany({
+            where: {
+                isDeleted: false,
+                status: 'inactivo',
+                membresias: {
+                    some: {
+                        status: 'activa',
+                        fechaFin: { gte: hoy }
+                    }
+                }
+            },
+            data: { status: 'activo' }
+        });
+
+        // Socio sin membresía vigente => inactivo en BD (equivale a vencido en front)
+        const sociosVencidos = await prisma.socio.updateMany({
+            where: {
+                isDeleted: false,
+                status: 'activo',
+                membresias: {
+                    none: {
+                        status: 'activa',
+                        fechaFin: { gte: hoy }
+                    }
+                }
+            },
+            data: { status: 'inactivo' }
+        });
+
         // TAREA 2: GENERACIÓN DE ALERTAS
         let config = await prisma.configuracionAlerta.findFirst();
         if (!config) config = await prisma.configuracionAlerta.create({ data: {} }); // Crea default si no existe
@@ -167,6 +197,8 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
             reporte: {
                 ofertas_desactivadas: ofertasLimpias.count,
                 membresias_vencidas: membresiasVencidas.count,
+                socios_reactivados_por_membresia_vigente: sociosReactivados.count,
+                socios_inactivados_por_vencimiento: sociosVencidos.count,
                 nuevas_alertas_generadas: nuevasAlertas,
                 fecha_ejecucion: hoy.toISOString()
             }
