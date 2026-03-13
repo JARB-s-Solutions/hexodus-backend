@@ -27,6 +27,25 @@ const validarMetodoPago = async (tx, metodoId) => {
     return fallback.id;
 };
 
+const recalcularStatusSocio = async (tx, socioId) => {
+    const hoy = new Date();
+
+    const membresiaVigentePagada = await tx.membresiaSocio.findFirst({
+        where: {
+            socioId,
+            status: 'activa',
+            estadoPago: 'pagado',
+            fechaFin: { gte: hoy }
+        },
+        select: { id: true }
+    });
+
+    await tx.socio.update({
+        where: { id: socioId },
+        data: { status: membresiaVigentePagada ? 'activo' : 'inactivo' }
+    });
+};
+
 
 // COTIZAR MEMBRESÍA
 export const cotizarMembresia = async (req, res) => {
@@ -663,12 +682,7 @@ export const actualizarSocio = async (req, res) => {
                     }
                 }
 
-                if (estadoPagoUI === 'pagado') {
-                    await tx.socio.update({
-                        where: { id: socioId },
-                        data: { status: 'activo' }
-                    });
-                }
+                await recalcularStatusSocio(tx, socioId);
             }
         }, {
             maxWait: 5000,
@@ -881,11 +895,8 @@ export const pagarMembresiaPendiente = async (req, res) => {
                 data: { estadoPago: 'pagado' }
             });
 
-            // 4. Reactivar socio al quedar al corriente
-            await tx.socio.update({
-                where: { id: socioId },
-                data: { status: 'activo' }
-            });
+            // 4. Recalcular status del socio en base a vigencia + pago
+            await recalcularStatusSocio(tx, socioId);
         });
 
         await registrarLog({
@@ -982,10 +993,7 @@ export const renovarMembresia = async (req, res) => {
                 }
             });
 
-            await tx.socio.update({
-                where: { id: socio.id },
-                data: { status: 'activo' }
-            });
+            await recalcularStatusSocio(tx, socio.id);
 
             datosRenovacion = { nombreSocio: socio.nombreCompleto, codigoSocio: socio.codigoSocio, nombrePlan: plan.nombre, precio: precioFinal };
         });

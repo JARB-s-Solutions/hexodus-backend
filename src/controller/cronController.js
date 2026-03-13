@@ -37,6 +37,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
                 membresias: {
                     some: {
                         status: 'activa',
+                        estadoPago: 'pagado',
                         fechaFin: { gte: hoy }
                     }
                 }
@@ -52,6 +53,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
                 membresias: {
                     none: {
                         status: 'activa',
+                        estadoPago: 'pagado',
                         fechaFin: { gte: hoy }
                     }
                 }
