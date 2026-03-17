@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { registrarLog } from "../services/auditoriaService.js";
+import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin } from "../utils/timezone.js";
 
 // REGISTRAR MOVIMIENTO MANUAL (Ingreso / Egreso)
 export const registrarMovimiento = async (req, res) => {
@@ -136,8 +137,8 @@ export const listarMovimientos = async (req, res) => {
         if (fecha_inicio && fecha_fin) {
             andConditions.push({
                 fecha: {
-                    gte: new Date(`${fecha_inicio}T00:00:00.000Z`),
-                    lte: new Date(`${fecha_fin}T23:59:59.999Z`)
+                    gte: fechaStrAInicio(fecha_inicio),
+                    lte: fechaStrAFin(fecha_fin)
                 }
             });
         }
@@ -259,56 +260,49 @@ export const obtenerComparacionMovimientos = async (req, res) => {
     try {
         const { periodo } = req.query; // 'Hoy', 'Este Mes', 'Este Trimestre', 'Este Semestre', 'Este Año'
 
-        const hoy = new Date();
-        let gteActual = new Date(hoy);
-        let lteActual = new Date(hoy);
-        let gteAnterior = new Date(hoy);
-        let lteAnterior = new Date(hoy);
-
-        gteActual.setHours(0, 0, 0, 0);
-        lteActual.setHours(23, 59, 59, 999);
-        gteAnterior.setHours(0, 0, 0, 0);
-        lteAnterior.setHours(23, 59, 59, 999);
+        const { year, month, day } = ahoraEnMerida();
+        let gteActual  = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteActual  = localAUTC(year, month, day, 23, 59, 59, 999);
+        let gteAnterior = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteAnterior = localAUTC(year, month, day, 23, 59, 59, 999);
 
         let labelAnterior = 'ANTERIOR';
 
         // Lógica de Fechas
         switch (periodo) {
             case 'Hoy':
-                gteAnterior.setDate(gteAnterior.getDate() - 1);
-                lteAnterior.setDate(lteAnterior.getDate() - 1);
+                gteAnterior = localAUTC(year, month, day - 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, day - 1, 23, 59, 59, 999);
                 labelAnterior = 'AYER';
                 break;
-            case 'Este Trimestre':
-                const mesTrim = Math.floor(gteActual.getMonth() / 3) * 3;
-                gteActual.setMonth(mesTrim, 1);
-                gteAnterior.setMonth(mesTrim - 3, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 3, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+            case 'Este Trimestre': {
+                const mesTriStart = Math.floor((month - 1) / 3) * 3 + 1;
+                gteActual   = localAUTC(year, mesTriStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesTriStart - 3, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesTriStart, 0, 23, 59, 59, 999);
                 labelAnterior = 'TRIM. ANTERIOR';
                 break;
-            case 'Este Semestre':
-                const mesSem = gteActual.getMonth() < 6 ? 0 : 6;
-                gteActual.setMonth(mesSem, 1);
-                gteAnterior.setMonth(mesSem - 6, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 6, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+            }
+            case 'Este Semestre': {
+                const mesSemStart = month <= 6 ? 1 : 7;
+                gteActual   = localAUTC(year, mesSemStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesSemStart - 6, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesSemStart, 0, 23, 59, 59, 999);
                 labelAnterior = 'SEM. ANTERIOR';
                 break;
+            }
             case 'Este Ano': // 'Ano' sin ñ para evitar problemas de codificación en URLs
             case 'Este Año':
-                gteActual.setMonth(0, 1);
-                gteAnterior.setFullYear(gteAnterior.getFullYear() - 1, 0, 1);
-                lteAnterior.setFullYear(lteAnterior.getFullYear(), 11, 31);
-                lteAnterior.setHours(23, 59, 59, 999);
+                gteActual   = localAUTC(year, 1, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year - 1, 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year - 1, 12, 31, 23, 59, 59, 999);
                 labelAnterior = 'AÑO ANTERIOR';
                 break;
             case 'Este Mes':
             default:
-                gteActual.setDate(1);
-                gteAnterior.setMonth(gteAnterior.getMonth() - 1, 1);
-                lteAnterior.setDate(0);
-                lteAnterior.setHours(23, 59, 59, 999);
+                gteActual   = localAUTC(year, month, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, month - 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, 0, 23, 59, 59, 999);
                 labelAnterior = 'MES ANTERIOR';
                 break;
         }

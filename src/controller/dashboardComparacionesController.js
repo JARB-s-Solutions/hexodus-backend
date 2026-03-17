@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin } from "../utils/timezone.js";
 
 const mapaPeriodos = {
     'hoy': 'Hoy',
@@ -28,43 +29,44 @@ export const obtenerComparacionesFinancieras = async (req, res) => {
         tab_seleccionada = (tab_seleccionada && mapaTabs[tab_seleccionada.toLowerCase()]) || 'Periodo Seleccionado';
 
         // A. LÓGICA DE FECHAS SEGÚN LA PESTAÑA SELECCIONADA
-        const hoy = new Date();
-        let gteActual = new Date(hoy), lteActual = new Date(hoy);
-        let gteAnterior = new Date(hoy), lteAnterior = new Date(hoy);
+        const { year, month, day } = ahoraEnMerida();
+        let gteActual  = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteActual  = localAUTC(year, month, day, 23, 59, 59, 999);
+        let gteAnterior = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteAnterior = localAUTC(year, month, day, 23, 59, 59, 999);
         let tituloComparacion = "";
-
-        gteActual.setHours(0, 0, 0, 0); lteActual.setHours(23, 59, 59, 999);
-        gteAnterior.setHours(0, 0, 0, 0); lteAnterior.setHours(23, 59, 59, 999);
 
         // Si elige una pestaña fija, sobreescribimos la lógica del "periodo" global
         switch (tab_seleccionada) {
             case 'Mes vs Mes Anterior':
-                gteActual.setDate(1);
-                gteAnterior.setMonth(gteAnterior.getMonth() - 1, 1);
-                lteAnterior.setDate(0); 
+                gteActual   = localAUTC(year, month, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, month - 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, 0, 23, 59, 59, 999);
                 tituloComparacion = "Mes Actual vs Mes Anterior";
                 break;
 
-            case 'Trimestre vs Anterior':
-                const mesTrim = Math.floor(gteActual.getMonth() / 3) * 3;
-                gteActual.setMonth(mesTrim, 1);
-                gteAnterior.setMonth(mesTrim - 3, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 3, 0);
+            case 'Trimestre vs Anterior': {
+                const mesTriStart = Math.floor((month - 1) / 3) * 3 + 1;
+                gteActual   = localAUTC(year, mesTriStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesTriStart - 3, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesTriStart, 0, 23, 59, 59, 999);
                 tituloComparacion = "Trimestre Actual vs Trimestre Anterior";
                 break;
+            }
 
-            case 'Semestre vs Anterior':
-                const mesSem = gteActual.getMonth() < 6 ? 0 : 6;
-                gteActual.setMonth(mesSem, 1);
-                gteAnterior.setMonth(mesSem - 6, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 6, 0);
+            case 'Semestre vs Anterior': {
+                const mesSemStart = month <= 6 ? 1 : 7;
+                gteActual   = localAUTC(year, mesSemStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesSemStart - 6, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesSemStart, 0, 23, 59, 59, 999);
                 tituloComparacion = "Semestre Actual vs Semestre Anterior";
                 break;
+            }
 
             case 'Ano vs Anterior':
-                gteActual.setMonth(0, 1);
-                gteAnterior.setFullYear(gteAnterior.getFullYear() - 1, 0, 1);
-                lteAnterior.setFullYear(lteAnterior.getFullYear() - 1, 11, 31);
+                gteActual   = localAUTC(year, 1, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year - 1, 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year - 1, 12, 31, 23, 59, 59, 999);
                 tituloComparacion = "Año Actual vs Año Anterior";
                 break;
 
@@ -74,46 +76,55 @@ export const obtenerComparacionesFinancieras = async (req, res) => {
                 tituloComparacion = `${periodo} vs Periodo Anterior`;
                 switch (periodo) {
                     case 'Hoy':
-                        gteAnterior.setDate(gteAnterior.getDate() - 1); lteAnterior.setDate(lteAnterior.getDate() - 1);
+                        gteAnterior = localAUTC(year, month, day - 1, 0, 0, 0, 0);
+                        lteAnterior = localAUTC(year, month, day - 1, 23, 59, 59, 999);
                         tituloComparacion = "Hoy vs Ayer";
                         break;
-                    case 'Esta Semana':
-                        const diaSemana = gteActual.getDay() || 7;
-                        gteActual.setDate(gteActual.getDate() - diaSemana + 1);
-                        gteAnterior = new Date(gteActual); gteAnterior.setDate(gteAnterior.getDate() - 7);
-                        lteAnterior = new Date(gteActual); lteAnterior.setDate(lteAnterior.getDate() - 1);
+                    case 'Esta Semana': {
+                        const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+                        const diaSemana = jsDay === 0 ? 7 : jsDay;
+                        gteActual   = localAUTC(year, month, day - diaSemana + 1, 0, 0, 0, 0);
+                        gteAnterior = localAUTC(year, month, day - diaSemana - 6, 0, 0, 0, 0);
+                        lteAnterior = localAUTC(year, month, day - diaSemana, 23, 59, 59, 999);
                         break;
+                    }
                     case 'Este Mes':
-                        gteActual.setDate(1);
-                        gteAnterior.setMonth(gteAnterior.getMonth() - 1, 1); lteAnterior.setDate(0); 
+                        gteActual   = localAUTC(year, month, 1, 0, 0, 0, 0);
+                        gteAnterior = localAUTC(year, month - 1, 1, 0, 0, 0, 0);
+                        lteAnterior = localAUTC(year, month, 0, 23, 59, 59, 999);
                         break;
-                    case 'Este Trimestre':
-                        const mT = Math.floor(gteActual.getMonth() / 3) * 3;
-                        gteActual.setMonth(mT, 1); gteAnterior.setMonth(mT - 3, 1);
-                        lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 3, 0);
+                    case 'Este Trimestre': {
+                        const mT = Math.floor((month - 1) / 3) * 3 + 1;
+                        gteActual   = localAUTC(year, mT, 1, 0, 0, 0, 0);
+                        gteAnterior = localAUTC(year, mT - 3, 1, 0, 0, 0, 0);
+                        lteAnterior = localAUTC(year, mT, 0, 23, 59, 59, 999);
                         break;
-                    case 'Este Semestre':
-                        const mS = gteActual.getMonth() < 6 ? 0 : 6;
-                        gteActual.setMonth(mS, 1); gteAnterior.setMonth(mS - 6, 1);
-                        lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 6, 0);
+                    }
+                    case 'Este Semestre': {
+                        const mS = month <= 6 ? 1 : 7;
+                        gteActual   = localAUTC(year, mS, 1, 0, 0, 0, 0);
+                        gteAnterior = localAUTC(year, mS - 6, 1, 0, 0, 0, 0);
+                        lteAnterior = localAUTC(year, mS, 0, 23, 59, 59, 999);
                         break;
-                    case 'Este Ano': 
-                        gteActual.setMonth(0, 1); gteAnterior.setFullYear(gteAnterior.getFullYear() - 1, 0, 1);
-                        lteAnterior.setFullYear(lteAnterior.getFullYear() - 1, 11, 31);
+                    }
+                    case 'Este Ano':
+                        gteActual   = localAUTC(year, 1, 1, 0, 0, 0, 0);
+                        gteAnterior = localAUTC(year - 1, 1, 1, 0, 0, 0, 0);
+                        lteAnterior = localAUTC(year - 1, 12, 31, 23, 59, 59, 999);
                         break;
                     case 'Personalizado':
                         if (fecha_inicio && fecha_fin) {
-                            gteActual = new Date(`${fecha_inicio}T00:00:00.000Z`); lteActual = new Date(`${fecha_fin}T23:59:59.999Z`);
+                            gteActual = fechaStrAInicio(fecha_inicio);
+                            lteActual = fechaStrAFin(fecha_fin);
                             const diffDays = Math.ceil(Math.abs(lteActual - gteActual) / (1000 * 60 * 60 * 24));
-                            gteAnterior = new Date(gteActual); gteAnterior.setDate(gteAnterior.getDate() - diffDays);
-                            lteAnterior = new Date(gteActual); lteAnterior.setDate(lteAnterior.getDate() - 1);
+                            const [fy, fm, fd] = fecha_inicio.split('-').map(Number);
+                            gteAnterior = localAUTC(fy, fm, fd - diffDays, 0, 0, 0, 0);
+                            lteAnterior = localAUTC(fy, fm, fd - 1, 23, 59, 59, 999);
                         }
                         break;
                 }
                 break;
         }
-        // Ajustamos horas del periodo anterior por si las matemáticas de días las movieron
-        lteAnterior.setHours(23, 59, 59, 999);
 
         // B. CONSULTAS A LA BD
         const [

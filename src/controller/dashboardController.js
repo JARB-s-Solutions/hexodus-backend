@@ -1,34 +1,36 @@
 import prisma from "../config/prisma.js";
+import { ahoraEnMerida, localAUTC, fechaUTCADiaStr, partesEnMerida } from "../utils/timezone.js";
 
 // ==========================================
 // MOTOR DE FECHAS CENTRALIZADO
 // ==========================================
 const calcularFechasDashboard = (periodoFiltro) => {
     const p = (periodoFiltro || 'semana').toLowerCase();
-    const hoy = new Date();
-    
-    // Inicio del día a las 00:00:00
-    const inicioHoy = new Date(hoy); 
-    inicioHoy.setHours(0, 0, 0, 0);
-    
-    let gteAct = new Date(inicioHoy), lteAct = new Date(hoy);
-    let gteAnt = new Date(inicioHoy), lteAnt = new Date(hoy);
+    const { year, month, day } = ahoraEnMerida();
+
+    // Inicio y fin de HOY en Mérida (como UTC para consultas Prisma)
+    const inicioHoy = localAUTC(year, month, day, 0, 0, 0, 0);
+    const finHoy    = localAUTC(year, month, day, 23, 59, 59, 999);
+
+    let gteAct = inicioHoy, lteAct = new Date(); // "ahora mismo" como límite superior
+    let gteAnt = inicioHoy, lteAnt = finHoy;
 
     if (p === 'mes') {
-        gteAct.setDate(1); // 1ro de este mes
-        gteAnt = new Date(gteAct); gteAnt.setMonth(gteAnt.getMonth() - 1); // 1ro del mes pasado
-        lteAnt = new Date(gteAct); lteAnt.setMilliseconds(-1); // Último segundo del mes pasado
+        gteAct = localAUTC(year, month, 1, 0, 0, 0, 0);            // 1ro de este mes
+        gteAnt = localAUTC(year, month - 1, 1, 0, 0, 0, 0);        // 1ro del mes pasado
+        lteAnt = localAUTC(year, month, 0, 23, 59, 59, 999);        // Último día del mes pasado
     } else if (p === 'hoy') {
-        gteAnt.setDate(gteAnt.getDate() - 1); // Ayer a las 00:00
-        lteAnt = new Date(gteAnt); lteAnt.setHours(23, 59, 59, 999); // Ayer a las 23:59
-    } else { 
+        gteAnt = localAUTC(year, month, day - 1, 0, 0, 0, 0);      // Ayer 00:00
+        lteAnt = localAUTC(year, month, day - 1, 23, 59, 59, 999); // Ayer 23:59
+    } else {
         // Por defecto 'semana' (Lunes a Domingo)
-        const diaSemana = hoy.getDay() === 0 ? 7 : hoy.getDay(); 
-        gteAct.setDate(hoy.getDate() - diaSemana + 1); // Lunes de esta semana
-        gteAnt = new Date(gteAct); gteAnt.setDate(gteAnt.getDate() - 7); // Lunes pasada
-        lteAnt = new Date(gteAct); lteAnt.setMilliseconds(-1); // Domingo pasado 23:59:59
+        const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+        const diaSemana = jsDay === 0 ? 7 : jsDay; // 1=Lun ... 7=Dom
+        gteAct = localAUTC(year, month, day - diaSemana + 1, 0, 0, 0, 0); // Lunes de esta semana
+        gteAnt = localAUTC(year, month, day - diaSemana - 6, 0, 0, 0, 0); // Lunes semana pasada
+        lteAnt = localAUTC(year, month, day - diaSemana, 23, 59, 59, 999); // Domingo pasado 23:59
     }
-    
+
     const periodoLabel = p.charAt(0).toUpperCase() + p.slice(1); // 'Mes', 'Semana', 'Hoy'
     return { gteAct, lteAct, gteAnt, lteAnt, periodoLabel };
 };
@@ -91,18 +93,19 @@ export const obtenerMetricasDashboard = async (req, res) => {
         // ---------------------------------------------------------
         // A. CÁLCULO ESTÁTICO DE FECHAS (Para Gráficas fijas)
         // ---------------------------------------------------------
-        const hoy = new Date();
-        const inicioHoy = new Date(hoy); inicioHoy.setHours(0, 0, 0, 0);
+        const { year, month, day } = ahoraEnMerida();
 
-        const inicioAyer = new Date(inicioHoy); inicioAyer.setDate(inicioAyer.getDate() - 1);
-        const finAyer = new Date(inicioHoy); finAyer.setMilliseconds(-1);
+        const inicioHoy   = localAUTC(year, month, day, 0, 0, 0, 0);
+        const inicioAyer  = localAUTC(year, month, day - 1, 0, 0, 0, 0);
+        const finAyer     = localAUTC(year, month, day - 1, 23, 59, 59, 999);
+        const hace7Dias   = localAUTC(year, month, day - 6, 0, 0, 0, 0);
+        const ahoraUtc = new Date();
 
-        const hace7Dias = new Date(inicioHoy); hace7Dias.setDate(hace7Dias.getDate() - 6);
-
-        const diaSemana = hoy.getDay() === 0 ? 7 : hoy.getDay(); 
-        const inicioEstaSemana = new Date(inicioHoy); inicioEstaSemana.setDate(inicioHoy.getDate() - diaSemana + 1);
-        const inicioSemanaPasada = new Date(inicioEstaSemana); inicioSemanaPasada.setDate(inicioSemanaPasada.getDate() - 7);
-        const finSemanaPasada = new Date(inicioEstaSemana); finSemanaPasada.setMilliseconds(-1);
+        const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+        const diaSemana = jsDay === 0 ? 7 : jsDay;
+        const inicioEstaSemana  = localAUTC(year, month, day - diaSemana + 1, 0, 0, 0, 0);
+        const inicioSemanaPasada = localAUTC(year, month, day - diaSemana - 6, 0, 0, 0, 0);
+        const finSemanaPasada    = localAUTC(year, month, day - diaSemana, 23, 59, 59, 999);
 
         // ---------------------------------------------------------
         // B. CONSULTAS MASIVAS EN PARALELO
@@ -112,11 +115,11 @@ export const obtenerMetricasDashboard = async (req, res) => {
             ventasEstaSemana, ventasSemanaPasada,
             insIngresosAct, insGastosAct, insIngresosAnt, insGastosAnt // Consultas rápidas para el Insight
         ] = await Promise.all([
-            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: hace7Dias, lte: hoy } }, select: { fecha: true, monto: true } }),
-            prisma.acceso.findMany({ where: { tipo: 'IN', fechaHora: { gte: inicioHoy, lte: hoy } }, include: { socio: { select: { genero: true } } } }),
+            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: hace7Dias, lte: ahoraUtc } }, select: { fecha: true, monto: true } }),
+            prisma.acceso.findMany({ where: { tipo: 'IN', fechaHora: { gte: inicioHoy, lte: ahoraUtc } }, include: { socio: { select: { genero: true } } } }),
             prisma.acceso.count({ where: { tipo: 'IN', fechaHora: { gte: inicioAyer, lte: finAyer } } }),
             prisma.producto.findMany({ where: { isDeleted: false, stock: { is: { cantidad: { lte: 10 } } } }, select: { nombre: true, stock: { select: { cantidad: true } } }, orderBy: { stock: { cantidad: 'asc' } }, take: 5 }),
-            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: inicioEstaSemana, lte: hoy } }, select: { fecha: true, monto: true } }),
+            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: inicioEstaSemana, lte: ahoraUtc } }, select: { fecha: true, monto: true } }),
             prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: inicioSemanaPasada, lte: finSemanaPasada } }, select: { fecha: true, monto: true } }),
             
             // INSIGHT MATH
@@ -142,11 +145,11 @@ export const obtenerMetricasDashboard = async (req, res) => {
         // 2. GRÁFICA: Ingresos Diarios
         const ingresosMap = new Map();
         for (let i = 0; i < 7; i++) {
-            const d = new Date(hace7Dias); d.setDate(d.getDate() + i);
-            ingresosMap.set(d.toISOString().split('T')[0], 0);
+            const d = localAUTC(year, month, day - 6 + i, 0, 0, 0, 0);
+            ingresosMap.set(fechaUTCADiaStr(d), 0);
         }
         ingresos7Dias.forEach(mov => {
-            const dia = mov.fecha.toISOString().split('T')[0];
+            const dia = fechaUTCADiaStr(mov.fecha);
             if (ingresosMap.has(dia)) ingresosMap.set(dia, ingresosMap.get(dia) + parseFloat(mov.monto));
         });
         const grafica_ingresos = Array.from(ingresosMap, ([fecha, total]) => ({ fecha, total }));
@@ -156,7 +159,7 @@ export const obtenerMetricasDashboard = async (req, res) => {
         let hombres = 0, mujeres = 0;
 
         accesosHoy.forEach(acceso => {
-            const etiquetaHora = `${acceso.fechaHora.getHours()}:00`; 
+            const etiquetaHora = `${partesEnMerida(acceso.fechaHora).hour}:00`;
             horasMap.set(etiquetaHora, (horasMap.get(etiquetaHora) || 0) + 1);
 
             const gen = (acceso.socio?.genero || '').toLowerCase();
@@ -176,11 +179,13 @@ export const obtenerMetricasDashboard = async (req, res) => {
         ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'].forEach(d => ventasMap.set(d, { actual: 0, anterior: 0 }));
 
         ventasEstaSemana.forEach(v => {
-            const nom = nombresDias[v.fecha.getDay()];
+            const p = partesEnMerida(v.fecha);
+            const nom = nombresDias[new Date(p.year, p.month - 1, p.day).getDay()];
             if(ventasMap.has(nom)) ventasMap.get(nom).actual += parseFloat(v.monto);
         });
         ventasSemanaPasada.forEach(v => {
-            const nom = nombresDias[v.fecha.getDay()];
+            const p = partesEnMerida(v.fecha);
+            const nom = nombresDias[new Date(p.year, p.month - 1, p.day).getDay()];
             if(ventasMap.has(nom)) ventasMap.get(nom).anterior += parseFloat(v.monto);
         });
         const grafica_ventas_vs_anterior = Array.from(ventasMap, ([dia, vals]) => ({ dia, actual: vals.actual, anterior: vals.anterior }));

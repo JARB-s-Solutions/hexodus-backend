@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
+import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr } from "../utils/timezone.js";
 
 
 // REGISTRAR NUEVA VENTA (Punto de Venta) 
@@ -242,41 +243,39 @@ export const listarVentas = async (req, res) => {
         }
 
         // Filtro por Periodo de Tiempo
-        const hoy = new Date();
+        const { year: _y, month: _m, day: _d } = ahoraEnMerida();
         let gteDate = null;
         let lteDate = null;
 
         if (periodo && periodo !== 'Todos') {
-            gteDate = new Date(hoy);
-            lteDate = new Date(hoy);
-            
-            gteDate.setHours(0, 0, 0, 0);
-            lteDate.setHours(23, 59, 59, 999);
+            gteDate = localAUTC(_y, _m, _d, 0, 0, 0, 0);
+            lteDate = localAUTC(_y, _m, _d, 23, 59, 59, 999);
 
             switch (periodo) {
                 case 'Ayer':
-                    gteDate.setDate(gteDate.getDate() - 1);
-                    lteDate.setDate(lteDate.getDate() - 1);
+                    gteDate = localAUTC(_y, _m, _d - 1, 0, 0, 0, 0);
+                    lteDate = localAUTC(_y, _m, _d - 1, 23, 59, 59, 999);
                     break;
-                case 'Esta Semana':
-                    const diaSemana = gteDate.getDay() || 7; 
-                    gteDate.setDate(gteDate.getDate() - diaSemana + 1);
+                case 'Esta Semana': {
+                    const dowISO = new Date(Date.UTC(_y, _m - 1, _d)).getUTCDay() || 7;
+                    gteDate = localAUTC(_y, _m, _d - dowISO + 1, 0, 0, 0, 0);
                     break;
+                }
                 case 'Este Mes':
-                    gteDate.setDate(1);
+                    gteDate = localAUTC(_y, _m, 1, 0, 0, 0, 0);
                     break;
                 case 'Este Trimestre':
-                    gteDate.setMonth(Math.floor(gteDate.getMonth() / 3) * 3, 1);
+                    gteDate = localAUTC(_y, Math.floor((_m - 1) / 3) * 3 + 1, 1, 0, 0, 0, 0);
                     break;
                 case 'Este Semestre':
-                    gteDate.setMonth(gteDate.getMonth() < 6 ? 0 : 6, 1);
+                    gteDate = localAUTC(_y, _m <= 6 ? 1 : 7, 1, 0, 0, 0, 0);
                     break;
                 case 'Este Año':
-                    gteDate.setMonth(0, 1);
+                    gteDate = localAUTC(_y, 1, 1, 0, 0, 0, 0);
                     break;
                 case 'Personalizado':
-                    if (fecha_inicio) gteDate = new Date(`${fecha_inicio}T00:00:00.000Z`);
-                    if (fecha_fin) lteDate = new Date(`${fecha_fin}T23:59:59.999Z`);
+                    if (fecha_inicio) gteDate = fechaStrAInicio(fecha_inicio);
+                    if (fecha_fin) lteDate = fechaStrAFin(fecha_fin);
                     break;
             }
 
@@ -288,7 +287,7 @@ export const listarVentas = async (req, res) => {
         }
 
         // EJECUCIÓN PARALELA
-        const mesInicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        const mesInicio = localAUTC(_y, _m, 1, 0, 0, 0, 0);
 
         const [totalRecords, ventasPaginadas, aggregateFiltrado, ventasDelMes] = await Promise.all([
             prisma.venta.count({ where: whereClause }),
@@ -317,9 +316,9 @@ export const listarVentas = async (req, res) => {
         ]);
 
         // CÁLCULO DE KPIs
-        const hoyInicio = new Date(); hoyInicio.setHours(0, 0, 0, 0);
-        const ayerInicio = new Date(hoyInicio); ayerInicio.setDate(ayerInicio.getDate() - 1);
-        const ayerFin = new Date(ayerInicio); ayerFin.setHours(23, 59, 59, 999);
+        const hoyInicio = localAUTC(_y, _m, _d, 0, 0, 0, 0);
+        const ayerInicio = localAUTC(_y, _m, _d - 1, 0, 0, 0, 0);
+        const ayerFin = localAUTC(_y, _m, _d - 1, 23, 59, 59, 999);
 
         let ventasDiaTotal = 0, ventasAyerTotal = 0, transaccionesDia = 0;
         let productosDia = 0, productosAyer = 0, ventasMesTotal = 0;
@@ -349,7 +348,7 @@ export const listarVentas = async (req, res) => {
 
         let formatoFechaRango = "Todo el histórico";
         if (gteDate && lteDate) {
-            formatoFechaRango = `${gteDate.toISOString().split('T')[0]} a ${lteDate.toISOString().split('T')[0]}`;
+            formatoFechaRango = `${fechaUTCADiaStr(gteDate)} a ${fechaUTCADiaStr(lteDate)}`;
         } else if (periodo === 'Hoy') {
             formatoFechaRango = "Ventas de Hoy";
         }
