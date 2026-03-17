@@ -23,7 +23,12 @@ export const validarAsistenciaFacial = async (req, res) => {
         const sociosActivos = await prisma.socio.findMany({
             where: { status: 'activo', isDeleted: false, faceEncoding: { not: null } },
             include: {
-                membresias: { orderBy: { fechaFin: 'desc' }, take: 1, include: { plan: true } }
+                membresias: { 
+                    where: { status: 'activa' }, 
+                    orderBy: { id: 'desc' }, 
+                    take: 1, 
+                    include: { plan: true } 
+                }
             }
         });
 
@@ -307,7 +312,13 @@ export const registrarAsistenciaManual = async (req, res) => {
 
         const socio = await prisma.socio.findFirst({
             where: { codigoSocio: clave },
-            include: { membresias: { where: { status: 'activa' }, take: 1 } }
+            include: { 
+                membresias: { 
+                    where: { status: 'activa' }, 
+                    orderBy: { id: 'desc' }, 
+                    take: 1 
+                } 
+            }
         });
 
         if (!socio || socio.isDeleted) {
@@ -386,7 +397,14 @@ export const validarAsistenciaHuella = async (req, res) => {
                 OR: [ { id: parseInt(socioId) || undefined }, { codigoSocio: codigoSocio || undefined } ],
                 status: 'activo', isDeleted: false
             },
-            include: { membresias: { where: { status: 'activa' }, orderBy: { fechaFin: 'desc' }, take: 1, include: { plan: true } } }
+            include: { 
+                membresias: { 
+                    where: { status: 'activa' }, 
+                    orderBy: { id: 'desc' }, 
+                    take: 1, 
+                    include: { plan: true } 
+                } 
+            }
         });
 
         if (!socio) {
