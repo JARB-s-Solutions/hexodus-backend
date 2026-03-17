@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
 import { registrarLog } from "../services/auditoriaService.js";
+import { ahoraEnMerida } from "../utils/timezone.js";
 
 // AYUDANTES DE VALIDACIÓN GLOBALES
 const validarFecha = (fechaStr, nombreCampo) => {
@@ -278,12 +279,10 @@ export const listarSocios = async (req, res) => {
             whereClause.status = estado;
         }
 
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0); 
-        const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-        const limite7Dias = new Date(hoy);
-        limite7Dias.setDate(hoy.getDate() + 7);
-        limite7Dias.setHours(23, 59, 59, 999);
+        const { year: _sy, month: _sm, day: _sd } = ahoraEnMerida();
+        const hoy = new Date(Date.UTC(_sy, _sm - 1, _sd, 0, 0, 0, 0));
+        const inicioMes = new Date(Date.UTC(_sy, _sm - 1, 1, 0, 0, 0, 0));
+        const limite7Dias = new Date(Date.UTC(_sy, _sm - 1, _sd + 7, 23, 59, 59, 999));
 
         const [totalRecords, sociosRaw, sociosGlobalesStats] = await Promise.all([
             prisma.socio.count({ where: whereClause }),
@@ -406,8 +405,8 @@ export const obtenerSocio = async (req, res) => {
         const contratoActual = socio.contratos[0];
         const tieneContrato = !!contratoActual;
 
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
+        const { year: _oy, month: _om, day: _od } = ahoraEnMerida();
+        const hoy = new Date(Date.UTC(_oy, _om - 1, _od, 0, 0, 0, 0));
 
         const dataFormateada = {
             codigo_socio: socio.codigoSocio,
@@ -510,8 +509,9 @@ export const actualizarSocio = async (req, res) => {
                         });
                     }
                 } else if (contratoActual && !detalles_contrato.contrato_firmado) {
-                    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-                    const fechaFinContrato = new Date(contratoActual.fechaFin); fechaFinContrato.setHours(0, 0, 0, 0);
+                    const { year: _hy, month: _hm, day: _hd } = ahoraEnMerida();
+                    const hoy = new Date(Date.UTC(_hy, _hm - 1, _hd, 0, 0, 0, 0));
+                    const fechaFinContrato = new Date(contratoActual.fechaFin);
 
                     if (contratoActual.status === 'vigente' && fechaFinContrato >= hoy) {
                         throw new Error("REGLA_CONTRATO_VIGENTE"); 

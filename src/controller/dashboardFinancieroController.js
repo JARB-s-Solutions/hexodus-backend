@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr, fechaUTCAMesStr } from "../utils/timezone.js";
 
 const mapaPeriodos = {
     'hoy': 'Hoy',
@@ -30,58 +31,59 @@ export const obtenerResumenFinanciero = async (req, res) => {
         tipo_reporte = (tipo_reporte && mapaVistas[tipo_reporte.toLowerCase()]) || 'Reporte Completo';
 
         // A. LÓGICA DE FECHAS
-        const hoy = new Date();
-        let gteActual = new Date(hoy), lteActual = new Date(hoy);
-        let gteAnterior = new Date(hoy), lteAnterior = new Date(hoy);
-
-        gteActual.setHours(0, 0, 0, 0); lteActual.setHours(23, 59, 59, 999);
-        gteAnterior.setHours(0, 0, 0, 0); lteAnterior.setHours(23, 59, 59, 999);
+        const { year, month, day } = ahoraEnMerida();
+        let gteActual  = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteActual  = localAUTC(year, month, day, 23, 59, 59, 999);
+        let gteAnterior = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteAnterior = localAUTC(year, month, day, 23, 59, 59, 999);
 
         switch (periodo) {
             case 'Hoy':
-                gteAnterior.setDate(gteAnterior.getDate() - 1); lteAnterior.setDate(lteAnterior.getDate() - 1);
+                gteAnterior = localAUTC(year, month, day - 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, day - 1, 23, 59, 59, 999);
                 break;
-            case 'Esta Semana':
-                const diaSemana = gteActual.getDay() || 7;
-                gteActual.setDate(gteActual.getDate() - diaSemana + 1);
-                gteAnterior = new Date(gteActual); gteAnterior.setDate(gteAnterior.getDate() - 7);
-                lteAnterior = new Date(gteActual); lteAnterior.setDate(lteAnterior.getDate() - 1);
-                lteAnterior.setHours(23, 59, 59, 999);
+            case 'Esta Semana': {
+                const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+                const diaSemana = jsDay === 0 ? 7 : jsDay;
+                gteActual   = localAUTC(year, month, day - diaSemana + 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, month, day - diaSemana - 6, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, day - diaSemana, 23, 59, 59, 999);
                 break;
-            case 'Este Trimestre':
-                const mesTrimestre = Math.floor(gteActual.getMonth() / 3) * 3;
-                gteActual.setMonth(mesTrimestre, 1);
-                gteAnterior.setMonth(mesTrimestre - 3, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 3, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+            }
+            case 'Este Trimestre': {
+                const mesTriStart = Math.floor((month - 1) / 3) * 3 + 1;
+                gteActual   = localAUTC(year, mesTriStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesTriStart - 3, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesTriStart, 0, 23, 59, 59, 999);
                 break;
-            case 'Este Semestre':
-                const mesSemestre = gteActual.getMonth() < 6 ? 0 : 6;
-                gteActual.setMonth(mesSemestre, 1);
-                gteAnterior.setMonth(mesSemestre - 6, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 6, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+            }
+            case 'Este Semestre': {
+                const mesSemStart = month <= 6 ? 1 : 7;
+                gteActual   = localAUTC(year, mesSemStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesSemStart - 6, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesSemStart, 0, 23, 59, 59, 999);
                 break;
-            case 'Este Ano': 
-                gteActual.setMonth(0, 1);
-                gteAnterior.setFullYear(gteAnterior.getFullYear() - 1, 0, 1);
-                lteAnterior.setFullYear(lteAnterior.getFullYear() - 1, 11, 31);
+            }
+            case 'Este Ano':
+                gteActual   = localAUTC(year, 1, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year - 1, 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year - 1, 12, 31, 23, 59, 59, 999);
                 break;
             case 'Personalizado':
                 if (fecha_inicio && fecha_fin) {
-                    gteActual = new Date(`${fecha_inicio}T00:00:00.000Z`); lteActual = new Date(`${fecha_fin}T23:59:59.999Z`);
-                    const diffTime = Math.abs(lteActual - gteActual);
-                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                    gteAnterior = new Date(gteActual); gteAnterior.setDate(gteAnterior.getDate() - diffDays);
-                    lteAnterior = new Date(gteActual); lteAnterior.setDate(lteAnterior.getDate() - 1);
-                    lteAnterior.setHours(23, 59, 59, 999);
+                    gteActual = fechaStrAInicio(fecha_inicio);
+                    lteActual = fechaStrAFin(fecha_fin);
+                    const diffDays = Math.ceil(Math.abs(lteActual - gteActual) / (1000 * 60 * 60 * 24));
+                    const [fy, fm, fd] = fecha_inicio.split('-').map(Number);
+                    gteAnterior = localAUTC(fy, fm, fd - diffDays, 0, 0, 0, 0);
+                    lteAnterior = localAUTC(fy, fm, fd - 1, 23, 59, 59, 999);
                 }
                 break;
             case 'Este Mes':
             default:
-                gteActual.setDate(1);
-                gteAnterior.setMonth(gteAnterior.getMonth() - 1, 1);
-                lteAnterior.setDate(0); 
+                gteActual   = localAUTC(year, month, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, month - 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, 0, 23, 59, 59, 999);
                 break;
         }
 
@@ -207,7 +209,7 @@ export const obtenerResumenFinanciero = async (req, res) => {
         if (top_gastos.length > 0) insights.push({ tipo: 'neutral', texto: `Tu mayor gasto fue en la categoría '${top_gastos[0].categoria}' con $${top_gastos[0].monto.toLocaleString('en-US')}.` });
         if (rendimiento_planes.length > 0) insights.push({ tipo: 'neutral', texto: `Tu plan más popular fue '${rendimiento_planes[0].plan}' con ${rendimiento_planes[0].cantidad} ventas nuevas.` });
 
-        const formatoFechaRango = `${gteActual.toISOString().split('T')[0]} a ${lteActual.toISOString().split('T')[0]}`;
+        const formatoFechaRango = `${fechaUTCADiaStr(gteActual)} a ${fechaUTCADiaStr(lteActual)}`;
         const barra_inferior = {
             periodo_texto: periodo,
             rango_fechas: formatoFechaRango,
@@ -238,37 +240,40 @@ export const obtenerGraficasFinancieras = async (req, res) => {
         tipo_reporte = (tipo_reporte && mapaVistas[tipo_reporte.toLowerCase()]) || 'Reporte Completo';
 
         // A. LÓGICA DE FECHAS
-        const hoy = new Date();
-        let gteActual = new Date(hoy), lteActual = new Date(hoy);
-
-        gteActual.setHours(0, 0, 0, 0); lteActual.setHours(23, 59, 59, 999);
+        const { year, month, day } = ahoraEnMerida();
+        let gteActual = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteActual = localAUTC(year, month, day, 23, 59, 59, 999);
 
         switch (periodo) {
             case 'Hoy': break;
-            case 'Esta Semana':
-                const diaSemana = gteActual.getDay() || 7;
-                gteActual.setDate(gteActual.getDate() - diaSemana + 1);
+            case 'Esta Semana': {
+                const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+                const diaSemana = jsDay === 0 ? 7 : jsDay;
+                gteActual = localAUTC(year, month, day - diaSemana + 1, 0, 0, 0, 0);
                 break;
-            case 'Este Trimestre':
-                const mesTrimestre = Math.floor(gteActual.getMonth() / 3) * 3;
-                gteActual.setMonth(mesTrimestre, 1);
+            }
+            case 'Este Trimestre': {
+                const mesTriStart = Math.floor((month - 1) / 3) * 3 + 1;
+                gteActual = localAUTC(year, mesTriStart, 1, 0, 0, 0, 0);
                 break;
-            case 'Este Semestre':
-                const mesSemestre = gteActual.getMonth() < 6 ? 0 : 6;
-                gteActual.setMonth(mesSemestre, 1);
+            }
+            case 'Este Semestre': {
+                const mesSemStart = month <= 6 ? 1 : 7;
+                gteActual = localAUTC(year, mesSemStart, 1, 0, 0, 0, 0);
                 break;
-            case 'Este Ano': 
-                gteActual.setMonth(0, 1);
+            }
+            case 'Este Ano':
+                gteActual = localAUTC(year, 1, 1, 0, 0, 0, 0);
                 break;
             case 'Personalizado':
                 if (fecha_inicio && fecha_fin) {
-                    gteActual = new Date(`${fecha_inicio}T00:00:00.000Z`); 
-                    lteActual = new Date(`${fecha_fin}T23:59:59.999Z`);
+                    gteActual = fechaStrAInicio(fecha_inicio);
+                    lteActual = fechaStrAFin(fecha_fin);
                 }
                 break;
             case 'Este Mes':
             default:
-                gteActual.setDate(1);
+                gteActual = localAUTC(year, month, 1, 0, 0, 0, 0);
                 break;
         }
 
@@ -293,20 +298,20 @@ export const obtenerGraficasFinancieras = async (req, res) => {
 
         if (agruparPorMes) {
             while (iterador <= limite) {
-                const mesStr = iterador.toISOString().slice(0, 7); 
+                const mesStr = fechaUTCAMesStr(iterador);
                 tendenciaMap.set(mesStr, { ventas: 0, gastos: 0, membresias: 0, utilidad: 0 });
-                iterador.setMonth(iterador.getMonth() + 1);
+                iterador.setUTCMonth(iterador.getUTCMonth() + 1);
             }
         } else {
             while (iterador <= limite) {
-                const diaStr = iterador.toISOString().split('T')[0];
+                const diaStr = fechaUTCADiaStr(iterador);
                 tendenciaMap.set(diaStr, { ventas: 0, gastos: 0, membresias: 0, utilidad: 0 });
-                iterador.setDate(iterador.getDate() + 1);
+                iterador.setUTCDate(iterador.getUTCDate() + 1);
             }
         }
 
         movimientos.forEach(mov => {
-            const fechaClave = agruparPorMes ? mov.fecha.toISOString().slice(0, 7) : mov.fecha.toISOString().split('T')[0];
+            const fechaClave = agruparPorMes ? fechaUTCAMesStr(mov.fecha) : fechaUTCADiaStr(mov.fecha);
             const monto = parseFloat(mov.monto);
 
             if (tendenciaMap.has(fechaClave)) {

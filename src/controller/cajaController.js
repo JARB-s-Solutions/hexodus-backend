@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { registrarLog } from "../services/auditoriaService.js";
+import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin } from "../utils/timezone.js";
 
 // ABRIR CAJA (Fondo inicial) 
 export const abrirCaja = async (req, res) => {
@@ -258,14 +259,13 @@ export const listarCortes = async (req, res) => {
         let whereClause = {};
         if (fecha_inicio && fecha_fin) {
             whereClause.inicio = {
-                gte: new Date(`${fecha_inicio}T00:00:00.000Z`),
-                lte: new Date(`${fecha_fin}T23:59:59.999Z`)
+                gte: fechaStrAInicio(fecha_inicio),
+                lte: fechaStrAFin(fecha_fin)
             };
         }
 
         // Ejecutar consultas en paralelo para máxima velocidad
-        const hoyInicio = new Date(); hoyInicio.setHours(0, 0, 0, 0);
-        const hoyFin = new Date(hoyInicio); hoyFin.setHours(23, 59, 59, 999);
+        const { inicio: hoyInicio, fin: hoyFin } = rangoDiaHoy();
 
         const [totalRecords, cortesPaginados, cajaAbierta, movimientosHoy, ultimoCorteCerrado, totalCortesCerrados] = await Promise.all([
             prisma.corteCaja.count({ where: whereClause }),

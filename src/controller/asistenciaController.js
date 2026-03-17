@@ -1,40 +1,5 @@
 import prisma from "../config/prisma.js";
-
-const APP_TIMEZONE = process.env.APP_TIMEZONE || 'America/Merida';
-
-// AYUDANTES DE ZONA HORARIA Y MATEMÁTICAS
-const extraerPartesFechaEnZona = (date, timeZone) => {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-    }).formatToParts(date);
-    return parts.reduce((acc, part) => {
-        if (part.type !== 'literal') acc[part.type] = Number(part.value);
-        return acc;
-    }, {});
-};
-
-const obtenerOffsetZonaMs = (date, timeZone) => {
-    const p = extraerPartesFechaEnZona(date, timeZone);
-    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, 0);
-    return asUTC - date.getTime();
-};
-
-const fechaHoraZonaAUTC = (year, month, day, hour, minute, second, millisecond, timeZone) => {
-    const utcEstimado = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
-    const offset = obtenerOffsetZonaMs(new Date(utcEstimado), timeZone);
-    return new Date(utcEstimado - offset);
-};
-
-const obtenerRangoDelDiaEnZona = (timeZone) => {
-    const ahora = new Date();
-    const p = extraerPartesFechaEnZona(ahora, timeZone);
-    return {
-        fecha: `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`,
-        inicio: fechaHoraZonaAUTC(p.year, p.month, p.day, 0, 0, 0, 0, timeZone),
-        fin: fechaHoraZonaAUTC(p.year, p.month, p.day, 23, 59, 59, 999, timeZone)
-    };
-};
+import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida } from "../utils/timezone.js";
 
 const calcularDistancia = (desc1, desc2) => {
     if (!desc1 || !desc2 || desc1.length !== desc2.length) return 1.0; 
@@ -149,7 +114,7 @@ export const validarAsistenciaFacial = async (req, res) => {
                     id: nuevoAcceso.id,
                     tipo: nuevoAcceso.tipo,
                     estado_acceso: nuevoAcceso.estadoAcceso,
-                    timestamp: nuevoAcceso.fechaHora,
+                    timestamp: fechaUTCAISOEnMerida(nuevoAcceso.fechaHora),
                     confidence: (1 - bestDistance).toFixed(2) // Formato normalizado (e0.67) solicitado por frontend
                 }
             }
@@ -173,8 +138,8 @@ export const obtenerHistorialAsistencias = async (req, res) => {
 
         if (fecha_inicio && fecha_fin) {
             whereClause.fechaHora = {
-                gte: new Date(`${fecha_inicio}T00:00:00.000Z`),
-                lte: new Date(`${fecha_fin}T23:59:59.999Z`)
+                gte: fechaStrAInicio(fecha_inicio),
+                lte: fechaStrAFin(fecha_fin)
             };
         }
 
@@ -204,7 +169,7 @@ export const obtenerHistorialAsistencias = async (req, res) => {
             socio_nombre: a.socio.nombreCompleto,
             codigo_socio: a.socio.codigoSocio,
             foto_perfil_url: a.socio.fotoUrl,
-            timestamp: a.fechaHora,
+            timestamp: fechaUTCAISOEnMerida(a.fechaHora),
             tipo: a.tipo, // IN, OUT, DENEGADO
             estado_acceso: a.estadoAcceso, // permitido, denegado
             motivo_codigo: a.motivoCodigo,
@@ -230,7 +195,7 @@ export const obtenerAsistenciasHoy = async (req, res) => {
     try {
         const { tipo } = req.query; 
 
-        const { fecha, inicio: inicioHoy, fin: finHoy } = obtenerRangoDelDiaEnZona(APP_TIMEZONE);
+        const { fecha, inicio: inicioHoy, fin: finHoy } = rangoDiaHoy();
 
         let whereClause = { fechaHora: { gte: inicioHoy, lte: finHoy } };
         if (tipo) whereClause.tipo = tipo;
@@ -256,7 +221,7 @@ export const obtenerAsistenciasHoy = async (req, res) => {
                 socio_nombre: a.socio.nombreCompleto,
                 codigo_socio: a.socio.codigoSocio,
                 foto_perfil_url: a.socio.fotoUrl,
-                hora: a.fechaHora.toTimeString().split(' ')[0], 
+                hora: horaStringMerida(a.fechaHora),
                 tipo: a.tipo,
                 estado_acceso: a.estadoAcceso,
                 motivo_codigo: a.motivoCodigo,
@@ -311,7 +276,7 @@ export const obtenerAsistenciasSocio = async (req, res) => {
                 socio,
                 asistencias: asistencias.map(a => ({
                     id: a.id,
-                    timestamp: a.fechaHora,
+                    timestamp: fechaUTCAISOEnMerida(a.fechaHora),
                     tipo: a.tipo,
                     estado_acceso: a.estadoAcceso, 
                     motivo_codigo: a.motivoCodigo, 
@@ -321,7 +286,7 @@ export const obtenerAsistenciasSocio = async (req, res) => {
                 })),
                 estadisticas: {
                     total_mostradas: asistencias.length,
-                    ultima_asistencia: asistencias.length > 0 ? asistencias[0].fechaHora : null
+                    ultima_asistencia: asistencias.length > 0 ? fechaUTCAISOEnMerida(asistencias[0].fechaHora) : null
                 }
             }
         });
@@ -377,7 +342,7 @@ export const registrarAsistenciaManual = async (req, res) => {
                 socio_id: socio.id,
                 clave: socio.codigoSocio,
                 nombre: socio.nombreCompleto,
-                timestamp: nuevoAcceso.fechaHora,
+                timestamp: fechaUTCAISOEnMerida(nuevoAcceso.fechaHora),
                 tipo: nuevoAcceso.tipo,
                 estado_acceso: nuevoAcceso.estadoAcceso,
                 motivo_codigo: nuevoAcceso.motivoCodigo,
@@ -478,7 +443,7 @@ export const validarAsistenciaHuella = async (req, res) => {
                     foto_perfil_url: socio.fotoUrl, membresia: membresiaActual.plan.nombre, fecha_fin_membresia: membresiaActual.fechaFin
                 },
                 asistencia: {
-                    id: nuevoAcceso.id, tipo: nuevoAcceso.tipo, timestamp: nuevoAcceso.fechaHora, metodo: 'huella',
+                    id: nuevoAcceso.id, tipo: nuevoAcceso.tipo, timestamp: fechaUTCAISOEnMerida(nuevoAcceso.fechaHora), metodo: 'huella',
                     estado_acceso: nuevoAcceso.estadoAcceso
                 }
             }

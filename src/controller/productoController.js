@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
 import { registrarLog } from "../services/auditoriaService.js";
+import { ahoraEnMerida } from "../utils/timezone.js";
 
 // CREAR PRODUCTO NUEVO (Con Stock Inicial)
 export const crearProducto = async (req, res) => {
@@ -115,8 +116,8 @@ export const listarProductos = async (req, res) => {
             whereClause.status = estado; // 'activo' o 'inactivo'
         }
 
-        const hoy = new Date();
-        const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        const { year: _py, month: _pm } = ahoraEnMerida();
+        const inicioMes = new Date(Date.UTC(_py, _pm - 1, 1, 0, 0, 0, 0));
 
         // Ejecución Paralela (Paginación + Tabla + KPIs Globales)
         const [totalRecords, productosRaw, productosGlobales, totalCategorias] = await Promise.all([

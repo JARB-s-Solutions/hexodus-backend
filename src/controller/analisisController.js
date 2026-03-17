@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { ahoraEnMerida, localAUTC, fechaUTCADiaStr, fechaUTCAMesStr } from "../utils/timezone.js";
 
 // OBTENER DATOS PARA EL DASHBOARD DE ANÁLISIS
 export const obtenerAnalisisVentas = async (req, res) => {
@@ -6,106 +7,86 @@ export const obtenerAnalisisVentas = async (req, res) => {
         const { periodo } = req.query; // 'Este Mes', 'Mes Pasado', 'Este Año', etc.
 
         // 1. Determinar las Fechas del "Periodo Actual" y el "Periodo Anterior"
-        const hoy = new Date();
-        let gteActual = new Date(hoy);
-        let lteActual = new Date(hoy);
-        let gteAnterior = new Date(hoy);
-        let lteAnterior = new Date(hoy);
+        const { year, month, day } = ahoraEnMerida();
 
-        // Inicializamos todo al día de hoy desde las 00:00 hasta las 23:59
-        gteActual.setHours(0, 0, 0, 0);
-        lteActual.setHours(23, 59, 59, 999);
-        gteAnterior.setHours(0, 0, 0, 0);
-        lteAnterior.setHours(23, 59, 59, 999);
+        let gteActual  = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteActual  = localAUTC(year, month, day, 23, 59, 59, 999);
+        let gteAnterior = localAUTC(year, month, day, 0, 0, 0, 0);
+        let lteAnterior = localAUTC(year, month, day, 23, 59, 59, 999);
 
         // Lógica de fechas según el periodo seleccionado
         switch (periodo) {
             case 'Hoy':
                 // Actual: Hoy | Anterior: Ayer
-                gteAnterior.setDate(gteAnterior.getDate() - 1);
-                lteAnterior.setDate(lteAnterior.getDate() - 1);
+                gteAnterior = localAUTC(year, month, day - 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, day - 1, 23, 59, 59, 999);
                 break;
 
             case 'Ayer':
                 // Actual: Ayer | Anterior: Antier (hace 2 días)
-                gteActual.setDate(gteActual.getDate() - 1);
-                lteActual.setDate(lteActual.getDate() - 1);
-
-                gteAnterior.setDate(gteAnterior.getDate() - 2);
-                lteAnterior.setDate(lteAnterior.getDate() - 2);
+                gteActual   = localAUTC(year, month, day - 1, 0, 0, 0, 0);
+                lteActual   = localAUTC(year, month, day - 1, 23, 59, 59, 999);
+                gteAnterior = localAUTC(year, month, day - 2, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, day - 2, 23, 59, 59, 999);
                 break;
 
-            case 'Esta Semana':
+            case 'Esta Semana': {
                 // Actual: Lunes a Domingo de esta semana | Anterior: Semana pasada
-                const diaSemana = gteActual.getDay() || 7; // 1-Lunes, 7-Domingo
-                gteActual.setDate(gteActual.getDate() - diaSemana + 1);
-                
-                gteAnterior = new Date(gteActual);
-                gteAnterior.setDate(gteAnterior.getDate() - 7);
-                lteAnterior = new Date(gteAnterior);
-                lteAnterior.setDate(lteAnterior.getDate() + 6);
-                lteAnterior.setHours(23, 59, 59, 999);
+                const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+                const offset = jsDay === 0 ? 6 : jsDay - 1; // días desde el lunes
+                gteActual   = localAUTC(year, month, day - offset, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, month, day - offset - 7, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, day - offset - 1, 23, 59, 59, 999);
                 break;
+            }
 
             case 'Mes Pasado':
                 // Actual: Mes anterior completo | Anterior: Hace 2 meses
-                gteActual.setMonth(gteActual.getMonth() - 1, 1);
-                lteActual = new Date(gteActual.getFullYear(), gteActual.getMonth() + 1, 0);
-                lteActual.setHours(23, 59, 59, 999);
-
-                gteAnterior.setMonth(gteAnterior.getMonth() - 2, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 1, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+                gteActual   = localAUTC(year, month - 1, 1, 0, 0, 0, 0);
+                lteActual   = localAUTC(year, month, 0, 23, 59, 59, 999);  // día 0 = último del mes anterior
+                gteAnterior = localAUTC(year, month - 2, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month - 1, 0, 23, 59, 59, 999);
                 break;
 
-            case 'Este Trimestre':
+            case 'Este Trimestre': {
                 // Actual: Inicio del trimestre actual | Anterior: Trimestre anterior
-                const mesTrimestre = Math.floor(gteActual.getMonth() / 3) * 3;
-                gteActual.setMonth(mesTrimestre, 1);
-
-                gteAnterior.setMonth(mesTrimestre - 3, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 3, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+                const mesTriStart = Math.floor((month - 1) / 3) * 3 + 1;
+                gteActual   = localAUTC(year, mesTriStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesTriStart - 3, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesTriStart, 0, 23, 59, 59, 999);
                 break;
+            }
 
-            case 'Este Semestre':
+            case 'Este Semestre': {
                 // Actual: Semestre 1 o 2 | Anterior: Semestre anterior
-                const mesSemestre = gteActual.getMonth() < 6 ? 0 : 6;
-                gteActual.setMonth(mesSemestre, 1);
-
-                gteAnterior.setMonth(mesSemestre - 6, 1);
-                lteAnterior = new Date(gteAnterior.getFullYear(), gteAnterior.getMonth() + 6, 0);
-                lteAnterior.setHours(23, 59, 59, 999);
+                const mesSemStart = month <= 6 ? 1 : 7;
+                gteActual   = localAUTC(year, mesSemStart, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, mesSemStart - 6, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, mesSemStart, 0, 23, 59, 59, 999);
                 break;
+            }
 
             case 'Este Año':
                 // Actual: 1 Ene - 31 Dic | Anterior: Año pasado
-                gteActual.setMonth(0, 1);
-                
-                gteAnterior.setFullYear(gteAnterior.getFullYear() - 1, 0, 1);
-                lteAnterior.setFullYear(lteAnterior.getFullYear(), 11, 31);
-                lteAnterior.setHours(23, 59, 59, 999);
+                gteActual   = localAUTC(year, 1, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year - 1, 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year - 1, 12, 31, 23, 59, 59, 999);
                 break;
 
             case 'Año Pasado':
                 // Actual: Año pasado | Anterior: Hace 2 años
-                gteActual.setFullYear(gteActual.getFullYear() - 1, 0, 1);
-                lteActual.setFullYear(lteActual.getFullYear(), 11, 31);
-                lteActual.setHours(23, 59, 59, 999);
-
-                gteAnterior.setFullYear(gteAnterior.getFullYear() - 2, 0, 1);
-                lteAnterior.setFullYear(lteAnterior.getFullYear(), 11, 31);
-                lteAnterior.setHours(23, 59, 59, 999);
+                gteActual   = localAUTC(year - 1, 1, 1, 0, 0, 0, 0);
+                lteActual   = localAUTC(year - 1, 12, 31, 23, 59, 59, 999);
+                gteAnterior = localAUTC(year - 2, 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year - 2, 12, 31, 23, 59, 59, 999);
                 break;
 
             case 'Este Mes':
             default:
                 // Actual: Día 1 a hoy | Anterior: Mismos días pero del mes pasado
-                gteActual.setDate(1); 
-                
-                gteAnterior.setMonth(gteAnterior.getMonth() - 1, 1); 
-                lteAnterior.setDate(0); 
-                lteAnterior.setHours(23, 59, 59, 999);
+                gteActual   = localAUTC(year, month, 1, 0, 0, 0, 0);
+                gteAnterior = localAUTC(year, month - 1, 1, 0, 0, 0, 0);
+                lteAnterior = localAUTC(year, month, 0, 23, 59, 59, 999);
                 break;
         }
 
@@ -179,27 +160,24 @@ export const obtenerAnalisisVentas = async (req, res) => {
         if (agruparPorMes) {
             // Rellena los 12 meses
             while (fechaIterador <= fechaLimite) {
-                const mesStr = fechaIterador.toISOString().slice(0, 7); // Ej: "2026-01"
+                const mesStr = fechaUTCAMesStr(fechaIterador); // Ej: "2026-01" en zona Mérida
                 tendenciaMap.set(mesStr, 0);
-                fechaIterador.setMonth(fechaIterador.getMonth() + 1);
+                fechaIterador.setUTCMonth(fechaIterador.getUTCMonth() + 1);
             }
         } else {
             // Rellena día por día
             while (fechaIterador <= fechaLimite) {
-                const diaStr = fechaIterador.toISOString().split('T')[0]; // Ej: "2026-03-01"
+                const diaStr = fechaUTCADiaStr(fechaIterador); // Ej: "2026-03-01" en zona Mérida
                 tendenciaMap.set(diaStr, 0);
-                fechaIterador.setDate(fechaIterador.getDate() + 1);
+                fechaIterador.setUTCDate(fechaIterador.getUTCDate() + 1);
             }
         }
 
         // 2. Inyectar las ventas reales en el calendario
         ventasActuales.forEach(v => {
-            let claveFecha = "";
-            if (agruparPorMes) {
-                claveFecha = v.fechaVenta.toISOString().slice(0, 7); 
-            } else {
-                claveFecha = v.fechaVenta.toISOString().split('T')[0];
-            }
+            let claveFecha = agruparPorMes
+                ? fechaUTCAMesStr(v.fechaVenta)
+                : fechaUTCADiaStr(v.fechaVenta);
             
             // Si la fecha existe en el mapa, le sumamos la venta; si no, la creamos (por seguridad de zona horaria)
             if (tendenciaMap.has(claveFecha)) {
