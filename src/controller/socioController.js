@@ -1,15 +1,25 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
 import { registrarLog } from "../services/auditoriaService.js";
-import { ahoraEnMerida } from "../utils/timezone.js";
+import { ahoraEnMerida, fechaStrAInicio } from "../utils/timezone.js";
 
 // AYUDANTES DE VALIDACIÓN GLOBALES
 const validarFecha = (fechaStr, nombreCampo) => {
     if (!fechaStr) return null;
-    const fecha = new Date(fechaStr);
+    
+    let fecha;
+    
+    // Si el front manda solo la fecha "YYYY-MM-DD" o la medianoche UTC "T00:00:00"
+    if (typeof fechaStr === 'string' && (fechaStr.length === 10 || fechaStr.includes('T00:00:00'))) {
+        const soloFecha = fechaStr.split('T')[0]; // Extrae solo "2026-03-18"
+        fecha = fechaStrAInicio(soloFecha); // Lo convierte a la medianoche EXACTA de Campeche
+    } else {
+        fecha = new Date(fechaStr); // Si trae hora específica (ej. registro biométrico), la respeta
+    }
+
     if (isNaN(fecha.getTime())) throw new Error(`UX_ERROR:La fecha proporcionada para '${nombreCampo}' es inválida.`);
     
-    // Evitar fechas extremadamente raras por errores de tipeo del usuario (ej. año 0024 en vez de 2024)
+    // Evitar fechas extremadamente raras por errores de tipeo
     const year = fecha.getFullYear();
     if (year < 2000 || year > 2100) throw new Error(`UX_ERROR:La fecha para '${nombreCampo}' está fuera de un rango aceptable.`);
     
@@ -66,7 +76,7 @@ export const cotizarMembresia = async (req, res) => {
         }
 
         // Calcular Fechas blindadas
-        const inicio = new Date(fecha_inicio);
+        const inicio = validarFecha(fecha_inicio, 'Inicio de Cotización');
         if (isNaN(inicio.getTime())) return res.status(400).json({ error: "La fecha de inicio es inválida." });
         
         const fin = new Date(inicio);
