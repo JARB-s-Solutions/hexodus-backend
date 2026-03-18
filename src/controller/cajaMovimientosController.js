@@ -1,6 +1,6 @@
 import prisma from "../config/prisma.js";
 import { registrarLog } from "../services/auditoriaService.js";
-import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin } from "../utils/timezone.js";
+import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, partesEnMerida } from "../utils/timezone.js";
 
 // REGISTRAR MOVIMIENTO MANUAL (Ingreso / Egreso)
 export const registrarMovimiento = async (req, res) => {
@@ -223,10 +223,13 @@ export const listarMovimientos = async (req, res) => {
                 notaLimpia = notaLimpia.replace(/\[Pago: ID \d+\]\s*-?\s*/, '').trim();
             }
 
+            const p = partesEnMerida(mov.fecha);
+            const fechaLocalExacta = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}T${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}:${String(p.second).padStart(2, '0')}`;
+
             return {
                 id: mov.id,
                 folio: `MOV-${mov.id.toString().padStart(4, '0')}`,
-                fecha_hora: mov.fecha,
+                fecha_hora: fechaLocalExacta,
                 tipo: mov.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
                 concepto: mov.concepto.nombre,
                 nota_movimiento: notaLimpia || mov.concepto.nombre,
