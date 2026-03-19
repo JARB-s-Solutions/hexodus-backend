@@ -214,7 +214,7 @@ export const listarMovimientos = async (req, res) => {
 
         // Formatear la tabla
         const dataFormateada = movimientosRaw.map(mov => {
-            let metodoPagoStr = "N/A";
+            let metodoPagoStr = "Efectivo"; 
             let notaLimpia = mov.nota || 'Sin notas adicionales';
 
             const match = notaLimpia.match(/\[Pago: ID (\d+)\]/);
