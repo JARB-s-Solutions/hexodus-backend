@@ -184,7 +184,11 @@ export const listarMovimientos = async (req, res) => {
             }),
 
             prisma.cajaMovimiento.aggregate({
-                where: { ...whereClause, tipo: 'ingreso' },
+                where: { 
+                    ...whereClause, 
+                    tipo: 'ingreso',
+                    concepto: { nombre: { not: 'Apertura / Fondo de Caja' } } 
+                },
                 _sum: { monto: true }
             }),
 
@@ -314,13 +318,19 @@ export const obtenerComparacionMovimientos = async (req, res) => {
         const [agrupacionActual, agrupacionAnterior] = await Promise.all([
             prisma.cajaMovimiento.groupBy({
                 by: ['tipo'],
-                where: { fecha: { gte: gteActual, lte: lteActual } },
+                where: { 
+                    fecha: { gte: gteActual, lte: lteActual },
+                    concepto: { nombre: { not: 'Apertura / Fondo de Caja' } } 
+                },
                 _sum: { monto: true },
                 _count: { _all: true }
             }),
             prisma.cajaMovimiento.groupBy({
                 by: ['tipo'],
-                where: { fecha: { gte: gteAnterior, lte: lteAnterior } },
+                where: { 
+                    fecha: { gte: gteAnterior, lte: lteAnterior },
+                    concepto: { nombre: { not: 'Apertura / Fondo de Caja' } } 
+                },
                 _sum: { monto: true },
                 _count: { _all: true }
             })
