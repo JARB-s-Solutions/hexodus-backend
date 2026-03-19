@@ -343,6 +343,10 @@ export const actualizarProducto = async (req, res) => {
             }
         }
 
+        // VARIABLES DECLARADAS AFUERA PARA QUE EL LOG DE AUDITORÍA LAS PUEDA LEER
+        let huboAjuste = false;
+        let diferencia = 0;
+
         // Transacción para actualizar Producto + Stock + Historial (si hubo ajuste)
         await prisma.$transaction(async (tx) => {
             
@@ -369,8 +373,6 @@ export const actualizarProducto = async (req, res) => {
             }
 
             const nuevaCantidad = stock_actual !== undefined ? parseInt(stock_actual) : null;
-            let huboAjuste = false;
-            let diferencia = 0;
 
             // Si mandaron un stock y es distinto al que ya teníamos guardado...
             if (nuevaCantidad !== null && inventarioActual && nuevaCantidad !== inventarioActual.cantidad) {
