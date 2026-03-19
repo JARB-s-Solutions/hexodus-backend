@@ -180,7 +180,7 @@ export const crearVenta = async (req, res) => {
                     monto: totalVenta,
                     referenciaTipo: 'venta',
                     referenciaId: nuevaVenta.id,
-                    nota: `Ingreso por Venta #${nuevaVenta.id}`
+                    nota: `[Pago: ID ${metodo_pago_id}] Ingreso por Venta #${nuevaVenta.id}`
                 }
             });
 
