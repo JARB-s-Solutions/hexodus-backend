@@ -120,15 +120,16 @@ export const consultarCorte = async (req, res) => {
 
         // Extraer el fondo inicial (si existe en la caja abierta)
         if (cajaAbierta) {
-            const movApertura = cajaAbierta.movimientos.find(m => m.concepto.nombre === 'Apertura / Fondo de Caja');
+            const movApertura = cajaAbierta.movimientos.find(m => m.concepto.nombre.toLowerCase().includes('apertura'));
             if (movApertura) efectivoInicial = parseFloat(movApertura.monto);
         }
 
         const desgloseMovimientos = movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
-            
+            const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+
             // Si no es el fondo de caja, lo sumamos a los ingresos o egresos "operativos"
-            if (mov.concepto.nombre !== 'Apertura / Fondo de Caja') {
+            if (!esApertura) {
                 if (mov.tipo === 'ingreso') totalIngresos += monto;
                 if (mov.tipo === 'gasto') totalEgresos += monto;
             }
@@ -197,20 +198,30 @@ export const realizarCorte = async (req, res) => {
                 }
             });
 
-            // ACTUALIZACIÓN MASIVA (Súper rápida): Amarrar todos los movimientos de golpe
+            // ACTUALIZACIÓN MASIVA: Amarrar todos los movimientos flotantes
             await tx.cajaMovimiento.updateMany({
-                where: {
-                    fecha: { gte: inicio, lte: fin },
-                    corteId: null
-                },
+                where: { fecha: { gte: inicio, lte: fin }, corteId: null },
                 data: { corteId: cajaAbierta.id }
+            });
+
+            // Recalcular la suma REAL de la caja ahora que todos están amarrados
+            const todosLosMovimientos = await tx.cajaMovimiento.findMany({
+                where: { corteId: cajaAbierta.id },
+                include: { concepto: true }
+            });
+            
+            todosLosMovimientos.forEach(mov => {
+                const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+                if (mov.tipo === 'ingreso' && !esApertura) {
+                    sumaVentas += parseFloat(mov.monto);
+                }
             });
 
             // Cerrar el Corte Oficialmente
             const corteCerrado = await tx.corteCaja.update({
                 where: { id: cajaAbierta.id },
                 data: {
-                    fin: new Date(), // Se sella con la hora actual exacta
+                    fin: new Date(), 
                     status: 'cerrado',
                     totalVentas: sumaVentas,
                     observaciones: observacion || null
@@ -332,7 +343,9 @@ export const listarCortes = async (req, res) => {
 
             corte.movimientos.forEach(mov => {
                 const monto = parseFloat(mov.monto);
-                if (mov.concepto.nombre === 'Apertura / Fondo de Caja') cajaInicial += monto;
+                const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+                
+                if (esApertura) cajaInicial += monto;
                 else if (mov.tipo === 'ingreso') ingresos += monto;
                 else if (mov.tipo === 'gasto') egresos += monto;
             });
@@ -395,8 +408,9 @@ export const obtenerCorteDetalle = async (req, res) => {
 
         const movimientosFormateados = corte.movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
+            const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
             
-            if (mov.concepto.nombre === 'Apertura / Fondo de Caja') cajaInicial += monto;
+            if (esApertura) cajaInicial += monto;
             else if (mov.tipo === 'ingreso') ingresos += monto;
             else if (mov.tipo === 'gasto') egresos += monto;
 

@@ -187,7 +187,7 @@ export const listarMovimientos = async (req, res) => {
                 where: { 
                     ...whereClause, 
                     tipo: 'ingreso',
-                    concepto: { nombre: { not: 'Apertura / Fondo de Caja' } } 
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥 ESCUDO APLICADO
                 },
                 _sum: { monto: true }
             }),
@@ -320,7 +320,7 @@ export const obtenerComparacionMovimientos = async (req, res) => {
                 by: ['tipo'],
                 where: { 
                     fecha: { gte: gteActual, lte: lteActual },
-                    concepto: { nombre: { not: 'Apertura / Fondo de Caja' } } 
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥 ESCUDO APLICADO
                 },
                 _sum: { monto: true },
                 _count: { _all: true }
@@ -329,7 +329,7 @@ export const obtenerComparacionMovimientos = async (req, res) => {
                 by: ['tipo'],
                 where: { 
                     fecha: { gte: gteAnterior, lte: lteAnterior },
-                    concepto: { nombre: { not: 'Apertura / Fondo de Caja' } } 
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥 ESCUDO APLICADO
                 },
                 _sum: { monto: true },
                 _count: { _all: true }
