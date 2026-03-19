@@ -2,12 +2,29 @@ import prisma from "../config/prisma.js";
 import { registrarLog } from "../services/auditoriaService.js";
 import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin } from "../utils/timezone.js";
 
+// Detector Inteligente de Método de Pago
+const analizarMetodoPago = (nota, metodosCatalogo) => {
+    let esEfectivo = true; // Por defecto asumimos efectivo físico
+    let metodoNombre = "Efectivo";
+    if (!nota) return { esEfectivo, metodoNombre };
+    
+    const match = nota.match(/\[Pago: ID (\d+)\]/);
+    if (match) {
+        const metodoObj = metodosCatalogo.find(m => m.id === parseInt(match[1]));
+        if (metodoObj) {
+            metodoNombre = metodoObj.nombre;
+            // Si el nombre no incluye la palabra 'efectivo', es dinero digital
+            if (!metodoObj.nombre.toLowerCase().includes('efectivo')) esEfectivo = false;
+        }
+    }
+    return { esEfectivo, metodoNombre };
+};
+
 // ABRIR CAJA (Fondo inicial) 
 export const abrirCaja = async (req, res) => {
     try {
         const { monto_inicial } = req.body;
 
-        // Verificar si ya hay una caja abierta
         const cajaAbierta = await prisma.corteCaja.findFirst({
             where: { status: 'abierto' }
         });
@@ -16,10 +33,8 @@ export const abrirCaja = async (req, res) => {
             return res.status(400).json({ error: "Ya existe un turno de caja abierto. Debes cerrarlo primero." });
         }
 
-        // Transacción para crear el Corte y el Movimiento inicial automáticamente
         const resultado = await prisma.$transaction(async (tx) => {
             
-            // 1. Buscar o crear el concepto de Apertura automáticamente
             let conceptoApertura = await tx.concepto.findFirst({
                 where: { nombre: { equals: 'Apertura / Fondo de Caja', mode: 'insensitive' } }
             });
@@ -28,23 +43,21 @@ export const abrirCaja = async (req, res) => {
                 conceptoApertura = await tx.concepto.create({
                     data: {
                         nombre: 'Apertura / Fondo de Caja',
-                        tipo: 'ingreso' // Es un ingreso de efectivo para la base de la caja
+                        tipo: 'ingreso'
                     }
                 });
             }
             
-            // 2. Crear la sesión de caja
             const nuevoCorte = await tx.corteCaja.create({
                 data: {
                     usuarioId: req.user.id,
                     inicio: new Date(),
-                    fin: new Date(), // Se actualizará al cerrar
+                    fin: new Date(), 
                     status: 'abierto',
                     totalVentas: 0
                 }
             });
 
-            // 3. Registrar el ingreso del "Fondo de Caja" (Si declararon dinero)
             if (monto_inicial && parseFloat(monto_inicial) > 0) {
                 await tx.cajaMovimiento.create({
                     data: {
@@ -93,20 +106,17 @@ export const consultarCorte = async (req, res) => {
         const inicio = new Date(fecha_inicial);
         const fin = new Date(fecha_final);
 
-        // Buscar la caja abierta actual para sacar su fondo inicial
         const cajaAbierta = await prisma.corteCaja.findFirst({
             where: { status: 'abierto' },
             include: { movimientos: { include: { concepto: true } } }
         });
 
-        // Buscar TODOS los movimientos en ese rango de fechas 
-        // (Atrapamos los que hicimos en Ventas y Compras que aún no tienen corteId)
         const movimientos = await prisma.cajaMovimiento.findMany({
             where: {
                 fecha: { gte: inicio, lte: fin },
                 OR: [
-                    { corteId: null }, // Movimientos huérfanos (ventas/compras)
-                    { corteId: cajaAbierta ? cajaAbierta.id : -1 } // O los que ya son de esta caja
+                    { corteId: null },
+                    { corteId: cajaAbierta ? cajaAbierta.id : -1 } 
                 ]
             },
             include: { concepto: true, usuario: { select: { nombreCompleto: true } } },
@@ -114,11 +124,15 @@ export const consultarCorte = async (req, res) => {
         });
 
         // Calcular la matemática para tus 4 tarjetas
+        const metodosCatalogo = await prisma.metodoPago.findMany(); // Traemos el catálogo
+
         let totalIngresos = 0;
         let totalEgresos = 0;
         let efectivoInicial = 0;
+        let ingresosEfectivoFisico = 0; // Solo billetes
+        let egresosEfectivoFisico = 0;
 
-        // Extraer el fondo inicial (si existe en la caja abierta)
+        // Extraer el fondo inicial
         if (cajaAbierta) {
             const movApertura = cajaAbierta.movimientos.find(m => m.concepto.nombre.toLowerCase().includes('apertura'));
             if (movApertura) efectivoInicial = parseFloat(movApertura.monto);
@@ -127,11 +141,26 @@ export const consultarCorte = async (req, res) => {
         const desgloseMovimientos = movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
             const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+            
+            // Analizamos el método de pago
+            const { esEfectivo, metodoNombre } = analizarMetodoPago(mov.nota, metodosCatalogo);
 
-            // Si no es el fondo de caja, lo sumamos a los ingresos o egresos "operativos"
+            // Limpiamos la etiqueta secreta para que no se vea fea en el frontend
+            let notaLimpia = mov.nota || mov.concepto.nombre;
+            if (notaLimpia.includes('[Pago: ID')) {
+                notaLimpia = notaLimpia.replace(/\[Pago: ID \d+\]\s*-?\s*/, '').trim();
+            }
+
+            // Matemática separada
             if (!esApertura) {
-                if (mov.tipo === 'ingreso') totalIngresos += monto;
-                if (mov.tipo === 'gasto') totalEgresos += monto;
+                if (mov.tipo === 'ingreso') {
+                    totalIngresos += monto;
+                    if (esEfectivo) ingresosEfectivoFisico += monto;
+                }
+                if (mov.tipo === 'gasto') {
+                    totalEgresos += monto;
+                    if (esEfectivo) egresosEfectivoFisico += monto;
+                }
             }
 
             return {
@@ -140,11 +169,14 @@ export const consultarCorte = async (req, res) => {
                 concepto: mov.concepto.nombre,
                 tipo: mov.tipo,
                 monto: monto,
+                metodo: metodoNombre, // Ya viaja con "Transferencia", "Tarjeta", etc.
+                nota_movimiento: notaLimpia,
                 usuario: mov.usuario.nombreCompleto
             };
         });
 
-        const efectivoFinal = (efectivoInicial + totalIngresos) - totalEgresos;
+        // El cajón físico SOLO suma los billetes.
+        const efectivoFinal = (efectivoInicial + ingresosEfectivoFisico) - egresosEfectivoFisico;
 
         res.status(200).json({
             message: "Consulta generada correctamente",
@@ -154,7 +186,7 @@ export const consultarCorte = async (req, res) => {
                 efectivo_inicial: efectivoInicial,
                 efectivo_final: efectivoFinal
             },
-            movimientos: desgloseMovimientos // Para llenar la tabla que pondrás abajo del buscador
+            movimientos: desgloseMovimientos 
         });
 
     } catch (error) {
@@ -162,7 +194,6 @@ export const consultarCorte = async (req, res) => {
         res.status(500).json({ error: "Error interno al consultar los movimientos." });
     }
 };
-
 
 // REALIZAR CORTE DE CAJA
 export const realizarCorte = async (req, res) => {
@@ -180,10 +211,8 @@ export const realizarCorte = async (req, res) => {
         const inicio = new Date(fecha_inicial);
         const fin = new Date(fecha_final);
 
-        // Transacción Maestra con tiempo extendido por si hay cientos de ventas
         const resultado = await prisma.$transaction(async (tx) => {
             
-            // Obtener los movimientos flotantes solo para calcular la suma matemática
             const movimientosFlotantes = await tx.cajaMovimiento.findMany({
                 where: {
                     fecha: { gte: inicio, lte: fin },
@@ -191,25 +220,17 @@ export const realizarCorte = async (req, res) => {
                 }
             });
 
-            let sumaVentas = 0;
-            movimientosFlotantes.forEach(mov => {
-                if (mov.tipo === 'ingreso') {
-                    sumaVentas += parseFloat(mov.monto);
-                }
-            });
-
-            // ACTUALIZACIÓN MASIVA: Amarrar todos los movimientos flotantes
             await tx.cajaMovimiento.updateMany({
                 where: { fecha: { gte: inicio, lte: fin }, corteId: null },
                 data: { corteId: cajaAbierta.id }
             });
 
-            // Recalcular la suma REAL de la caja ahora que todos están amarrados
             const todosLosMovimientos = await tx.cajaMovimiento.findMany({
                 where: { corteId: cajaAbierta.id },
                 include: { concepto: true }
             });
             
+            let sumaVentas = 0;
             todosLosMovimientos.forEach(mov => {
                 const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
                 if (mov.tipo === 'ingreso' && !esApertura) {
@@ -217,7 +238,6 @@ export const realizarCorte = async (req, res) => {
                 }
             });
 
-            // Cerrar el Corte Oficialmente
             const corteCerrado = await tx.corteCaja.update({
                 where: { id: cajaAbierta.id },
                 data: {
@@ -230,8 +250,8 @@ export const realizarCorte = async (req, res) => {
 
             return corteCerrado;
         }, {
-            maxWait: 5000,   // Tiempo para conectarse
-            timeout: 20000   // Le damos 20 segundos para procesar en lugar de los 5 por defecto
+            maxWait: 5000,   
+            timeout: 20000   
         });
 
         await registrarLog({
@@ -256,7 +276,6 @@ export const realizarCorte = async (req, res) => {
     }
 };
 
-
 // 4. LISTAR HISTORIAL DE CORTES (Con Filtros y KPIs)
 export const listarCortes = async (req, res) => {
     try {
@@ -266,7 +285,6 @@ export const listarCortes = async (req, res) => {
 
         const { fecha_inicio, fecha_fin } = req.query;
 
-        // Filtro de Fechas 
         let whereClause = {};
         if (fecha_inicio && fecha_fin) {
             whereClause.inicio = {
@@ -275,10 +293,9 @@ export const listarCortes = async (req, res) => {
             };
         }
 
-        // Ejecutar consultas en paralelo para máxima velocidad
         const { inicio: hoyInicio, fin: hoyFin } = rangoDiaHoy();
 
-        const [totalRecords, cortesPaginados, cajaAbierta, movimientosHoy, ultimoCorteCerrado, totalCortesCerrados] = await Promise.all([
+        const [totalRecords, cortesPaginados, cajaAbierta, movimientosHoy, ultimoCorteCerrado, totalCortesCerrados, metodosCatalogo] = await Promise.all([
             prisma.corteCaja.count({ where: whereClause }),
             
             prisma.corteCaja.findMany({
@@ -307,25 +324,37 @@ export const listarCortes = async (req, res) => {
                 orderBy: { fin: 'desc' }
             }),
 
-            prisma.corteCaja.count({ where: { status: 'cerrado' } })
+            prisma.corteCaja.count({ where: { status: 'cerrado' } }),
+            
+            prisma.metodoPago.findMany() // Traemos catálogo para el KPI de caja
         ]);
 
-        // Calcular KPIs 
         let efectivoFondoActual = 0, efectivoIngresosActual = 0, efectivoEgresosActual = 0;
+        let gananciaNetaActual = 0;
+        
         if (cajaAbierta) {
             cajaAbierta.movimientos.forEach(mov => {
                 const monto = parseFloat(mov.monto);
-                if (mov.concepto.nombre === 'Apertura / Fondo de Caja') efectivoFondoActual += monto;
-                else if (mov.tipo === 'ingreso') efectivoIngresosActual += monto;
-                else if (mov.tipo === 'gasto') efectivoEgresosActual += monto;
+                const { esEfectivo } = analizarMetodoPago(mov.nota, metodosCatalogo);
+                const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+
+                if (esApertura) efectivoFondoActual += monto;
+                else if (mov.tipo === 'ingreso') {
+                    gananciaNetaActual += monto; // Para el KPI general suma todo
+                    if(esEfectivo) efectivoIngresosActual += monto; // Para el cajón, solo físico
+                }
+                else if (mov.tipo === 'gasto') {
+                    gananciaNetaActual -= monto;
+                    if(esEfectivo) efectivoEgresosActual += monto;
+                }
             });
         }
         const efectivoTotalActual = efectivoFondoActual + efectivoIngresosActual - efectivoEgresosActual;
-        const gananciaNetaActual = efectivoIngresosActual - efectivoEgresosActual;
 
         let ingresosHoy = 0, transaccionesHoy = 0;
         movimientosHoy.forEach(mov => {
-            if (mov.tipo === 'ingreso' && mov.concepto.nombre !== 'Apertura / Fondo de Caja') {
+            const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+            if (mov.tipo === 'ingreso' && !esApertura) {
                 ingresosHoy += parseFloat(mov.monto);
                 transaccionesHoy++;
             }
@@ -337,28 +366,34 @@ export const listarCortes = async (req, res) => {
             cortes_realizados: { total: totalCortesCerrados, ultimo: ultimoCorteCerrado ? ultimoCorteCerrado.fin : null }
         };
 
-        // Formatear la Tabla
         const dataFormateada = cortesPaginados.map(corte => {
-            let cajaInicial = 0, ingresos = 0, egresos = 0;
+            let cajaInicial = 0, ingresosFisico = 0, egresosFisico = 0, ingresosGlobal = 0, egresosGlobal = 0;
 
             corte.movimientos.forEach(mov => {
                 const monto = parseFloat(mov.monto);
                 const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+                const { esEfectivo } = analizarMetodoPago(mov.nota, metodosCatalogo);
                 
                 if (esApertura) cajaInicial += monto;
-                else if (mov.tipo === 'ingreso') ingresos += monto;
-                else if (mov.tipo === 'gasto') egresos += monto;
+                else if (mov.tipo === 'ingreso') {
+                    ingresosGlobal += monto;
+                    if(esEfectivo) ingresosFisico += monto;
+                }
+                else if (mov.tipo === 'gasto') {
+                    egresosGlobal += monto;
+                    if(esEfectivo) egresosFisico += monto;
+                }
             });
 
             return {
                 id: corte.id,
-                folio: `CC-${corte.id.toString().padStart(4, '0')}`, // Ej: CC-0001
+                folio: `CC-${corte.id.toString().padStart(4, '0')}`,
                 fecha_inicio: corte.inicio,
                 fecha_fin: corte.status === 'abierto' ? null : corte.fin,
-                ingresos: ingresos,
-                egresos: egresos,
+                ingresos: ingresosGlobal, // La tabla muestra lo contable total
+                egresos: egresosGlobal,
                 caja_inicial: cajaInicial,
-                caja_final: cajaInicial + ingresos - egresos,
+                caja_final: cajaInicial + ingresosFisico - egresosFisico, 
                 usuario: corte.cajero.username,
                 fecha_creacion: corte.inicio,
                 observacion: corte.observaciones || '-',
@@ -378,7 +413,6 @@ export const listarCortes = async (req, res) => {
         res.status(500).json({ error: "Error interno al obtener el historial de caja." });
     }
 };
-
 
 // OBTENER DETALLE DE UN CORTE ESPECÍFICO
 export const obtenerCorteDetalle = async (req, res) => {
@@ -404,15 +438,24 @@ export const obtenerCorteDetalle = async (req, res) => {
             return res.status(404).json({ error: "Corte de caja no encontrado." });
         }
 
-        let cajaInicial = 0, ingresos = 0, egresos = 0;
+        const metodosCatalogo = await prisma.metodoPago.findMany();
+        let cajaInicial = 0, totalIngresos = 0, totalEgresos = 0;
+        let ingresosEfectivoFisico = 0, egresosEfectivoFisico = 0;
 
         const movimientosFormateados = corte.movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
             const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
+            const { esEfectivo, metodoNombre } = analizarMetodoPago(mov.nota, metodosCatalogo);
             
             if (esApertura) cajaInicial += monto;
-            else if (mov.tipo === 'ingreso') ingresos += monto;
-            else if (mov.tipo === 'gasto') egresos += monto;
+            else if (mov.tipo === 'ingreso') {
+                totalIngresos += monto;
+                if (esEfectivo) ingresosEfectivoFisico += monto;
+            }
+            else if (mov.tipo === 'gasto') {
+                totalEgresos += monto;
+                if (esEfectivo) egresosEfectivoFisico += monto;
+            }
 
             return {
                 id: mov.id,
@@ -421,6 +464,7 @@ export const obtenerCorteDetalle = async (req, res) => {
                 concepto: mov.concepto.nombre,
                 tipo: mov.tipo,
                 monto: monto,
+                metodo: metodoNombre, // Mostrará el medio de pago real
                 usuario: mov.usuario.nombreCompleto
             };
         });
@@ -431,17 +475,15 @@ export const obtenerCorteDetalle = async (req, res) => {
             folio: `CC-${corte.id.toString().padStart(4, '0')}`,
             estado: corte.status,
             
-            // Tarjetas Superiores
             fecha_inicio: corte.inicio,
             fecha_fin: corte.status === 'abierto' ? 'Caja Abierta' : corte.fin,
             usuario: corte.cajero.username,
             creado: corte.inicio,
             
-            // Tarjetas Inferiores
-            total_ingresos: ingresos,
-            total_egresos: egresos,
+            total_ingresos: totalIngresos, 
+            total_egresos: totalEgresos,
             caja_inicial: cajaInicial,
-            caja_final: cajaInicial + ingresos - egresos,
+            caja_final: cajaInicial + ingresosEfectivoFisico - egresosEfectivoFisico, 
             
             observaciones: corte.observaciones || 'Sin observaciones',
             movimientos: movimientosFormateados

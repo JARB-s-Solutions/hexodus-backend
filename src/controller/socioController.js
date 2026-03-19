@@ -233,7 +233,7 @@ export const crearSocio = async (req, res) => {
                             monto: precioFinal,
                             referenciaTipo: 'membresia',
                             referenciaId: membresiaAsignada.id,
-                            nota: `Suscripción inicial de socio ${nuevoSocio.codigoSocio}`
+                            nota: `[Pago: ID ${metodoPagoIdValido}] Suscripción inicial de socio ${nuevoSocio.codigoSocio}`
                         }
                     });
                 }
@@ -598,7 +598,7 @@ export const actualizarSocio = async (req, res) => {
                     await tx.cajaMovimiento.create({
                         data: {
                             corteId: cajaAbierta.id, usuarioId: req.user.id, conceptoId: conceptoMembresia.id,
-                            tipo: 'ingreso', monto: monto, referenciaTipo: 'membresia', referenciaId: membresiaId, nota: nota
+                            tipo: 'ingreso', monto: monto, referenciaTipo: 'membresia', referenciaId: membresiaId, nota: `[Pago: ID ${await obtenerMetodoPagoIdValido()}] ${nota}`
                         }
                     });
                 };
@@ -630,7 +630,7 @@ export const actualizarSocio = async (req, res) => {
                             monto: Math.abs(monto), 
                             referenciaTipo: 'membresia', 
                             referenciaId: membresiaId, 
-                            nota: nota
+                            nota: `[Pago: ID ${await obtenerMetodoPagoIdValido()}] ${nota}`
                         }
                     });
                 };
@@ -908,7 +908,7 @@ export const pagarMembresiaPendiente = async (req, res) => {
                     monto: membresia.precioCongelado,
                     referenciaTipo: 'membresia',
                     referenciaId: membresia.id,
-                    nota: `Pago de membresía atrasada. Socio: ${membresia.socio.codigoSocio}`
+                    nota: `[Pago: ID ${metodoPagoIdValido}] Pago de membresía atrasada. Socio: ${membresia.socio.codigoSocio}`
                 }
             });
 
@@ -1012,7 +1012,7 @@ export const renovarMembresia = async (req, res) => {
                     monto: precioFinal,
                     referenciaTipo: 'membresia',
                     referenciaId: nuevaMembresia.id,
-                    nota: `Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
+                    nota: `[Pago: ID ${metodoPagoIdValido}] Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
                 }
             });
 
