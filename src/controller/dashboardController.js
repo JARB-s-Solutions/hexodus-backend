@@ -45,9 +45,23 @@ export const obtenerKPIsDashboard = async (req, res) => {
         const { gteAct, lteAct, gteAnt, lteAnt } = calcularFechasDashboard(periodo);
 
         const [ ventasAct, gastosAct, ventasAnt, gastosAnt ] = await Promise.all([
-            prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', fecha: { gte: gteAct, lte: lteAct } }, _sum: { monto: true } }),
+            prisma.cajaMovimiento.aggregate({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: gteAct, lte: lteAct },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥 ESCUDO APLICADO
+                }, 
+                _sum: { monto: true } 
+            }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'gasto', fecha: { gte: gteAct, lte: lteAct } }, _sum: { monto: true } }),
-            prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', fecha: { gte: gteAnt, lte: lteAnt } }, _sum: { monto: true } }),
+            prisma.cajaMovimiento.aggregate({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: gteAnt, lte: lteAnt },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥 ESCUDO APLICADO
+                }, 
+                _sum: { monto: true } 
+            }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'gasto', fecha: { gte: gteAnt, lte: lteAnt } }, _sum: { monto: true } })
         ]);
 
@@ -115,17 +129,53 @@ export const obtenerMetricasDashboard = async (req, res) => {
             ventasEstaSemana, ventasSemanaPasada,
             insIngresosAct, insGastosAct, insIngresosAnt, insGastosAnt // Consultas rápidas para el Insight
         ] = await Promise.all([
-            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: hace7Dias, lte: ahoraUtc } }, select: { fecha: true, monto: true } }),
+            prisma.cajaMovimiento.findMany({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: hace7Dias, lte: ahoraUtc },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥
+                }, 
+                select: { fecha: true, monto: true } 
+            }),
             prisma.acceso.findMany({ where: { tipo: 'IN', fechaHora: { gte: inicioHoy, lte: ahoraUtc } }, include: { socio: { select: { genero: true } } } }),
             prisma.acceso.count({ where: { tipo: 'IN', fechaHora: { gte: inicioAyer, lte: finAyer } } }),
             prisma.producto.findMany({ where: { isDeleted: false, stock: { is: { cantidad: { lte: 10 } } } }, select: { nombre: true, stock: { select: { cantidad: true } } }, orderBy: { stock: { cantidad: 'asc' } }, take: 5 }),
-            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: inicioEstaSemana, lte: ahoraUtc } }, select: { fecha: true, monto: true } }),
-            prisma.cajaMovimiento.findMany({ where: { tipo: 'ingreso', fecha: { gte: inicioSemanaPasada, lte: finSemanaPasada } }, select: { fecha: true, monto: true } }),
+            
+            prisma.cajaMovimiento.findMany({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: inicioEstaSemana, lte: ahoraUtc },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥
+                }, 
+                select: { fecha: true, monto: true } 
+            }),
+            prisma.cajaMovimiento.findMany({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: inicioSemanaPasada, lte: finSemanaPasada },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥
+                }, 
+                select: { fecha: true, monto: true } 
+            }),
             
             // INSIGHT MATH
-            prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', fecha: { gte: insGteAct, lte: insLteAct } }, _sum: { monto: true } }),
+            prisma.cajaMovimiento.aggregate({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: insGteAct, lte: insLteAct },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥
+                }, 
+                _sum: { monto: true } 
+            }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'gasto', fecha: { gte: insGteAct, lte: insLteAct } }, _sum: { monto: true } }),
-            prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', fecha: { gte: insGteAnt, lte: insLteAnt } }, _sum: { monto: true } }),
+            prisma.cajaMovimiento.aggregate({ 
+                where: { 
+                    tipo: 'ingreso', 
+                    fecha: { gte: insGteAnt, lte: insLteAnt },
+                    NOT: { concepto: { nombre: { contains: 'apertura', mode: 'insensitive' } } } // 🔥
+                }, 
+                _sum: { monto: true } 
+            }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'gasto', fecha: { gte: insGteAnt, lte: insLteAnt } }, _sum: { monto: true } })
         ]);
 
