@@ -441,7 +441,7 @@ export const eliminarMovimiento = async (req, res) => {
         // Solo permitimos borrar referencias tipo 'otro' (manuales) o 'ajuste'.
         if (movimiento.referenciaTipo === 'venta' || movimiento.referenciaTipo === 'membresia') {
             return res.status(403).json({ 
-                error: `Operación denegada. Este es un movimiento automático generado por una ${movimiento.referenciaTipo.toUpperCase()}. Para eliminar este dinero de la caja, debes ir al módulo de ${movimiento.referenciaTipo}s y cancelarla desde ahí.` 
+                error: `Operación denegada. Este es un movimiento automático generado por una ${movimiento.referenciaTipo.toUpperCase()}. Solo se pueden eliminar movimientos manuales.` 
             });
         }
 
