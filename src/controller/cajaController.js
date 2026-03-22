@@ -123,14 +123,27 @@ export const consultarCorte = async (req, res) => {
             orderBy: { fecha: 'asc' }
         });
 
-        // Calcular la matemática para tus 4 tarjetas
-        const metodosCatalogo = await prisma.metodoPago.findMany(); // Traemos el catálogo
+        // Calcular la matemática para tus tarjetas y el desglose
+        const metodosCatalogo = await prisma.metodoPago.findMany(); 
 
         let totalIngresos = 0;
         let totalEgresos = 0;
         let efectivoInicial = 0;
-        let ingresosEfectivoFisico = 0; // Solo billetes
+        let ingresosEfectivoFisico = 0; 
         let egresosEfectivoFisico = 0;
+
+        // Inicializamos el mapa de métodos en ceros para el reporte
+        const saldosPorMetodoMap = new Map();
+        metodosCatalogo.forEach((metodo) => {
+            saldosPorMetodoMap.set(metodo.nombre, {
+                metodo: metodo.nombre,
+                ingresos: 0,
+                egresos: 0,
+                neto: 0
+            });
+        });
+        // Fallback de seguridad
+        if (!saldosPorMetodoMap.has('Efectivo')) saldosPorMetodoMap.set('Efectivo', { metodo: 'Efectivo', ingresos: 0, egresos: 0, neto: 0 });
 
         // Extraer el fondo inicial
         if (cajaAbierta) {
@@ -141,18 +154,17 @@ export const consultarCorte = async (req, res) => {
         const desgloseMovimientos = movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
             const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
-            
-            // Analizamos el método de pago
             const { esEfectivo, metodoNombre } = analizarMetodoPago(mov.nota, metodosCatalogo);
 
-            // Limpiamos la etiqueta secreta para que no se vea fea en el frontend
+            // Limpiamos la etiqueta secreta de la nota
             let notaLimpia = mov.nota || mov.concepto.nombre;
             if (notaLimpia.includes('[Pago: ID')) {
                 notaLimpia = notaLimpia.replace(/\[Pago: ID \d+\]\s*-?\s*/, '').trim();
             }
 
-            // Matemática separada
+            // MATEMÁTICA ESTRICTA: Solo sumamos si NO es la apertura de caja
             if (!esApertura) {
+                // 1. Sumas Globales Físicas vs Digitales
                 if (mov.tipo === 'ingreso') {
                     totalIngresos += monto;
                     if (esEfectivo) ingresosEfectivoFisico += monto;
@@ -160,6 +172,20 @@ export const consultarCorte = async (req, res) => {
                 if (mov.tipo === 'gasto') {
                     totalEgresos += monto;
                     if (esEfectivo) egresosEfectivoFisico += monto;
+                }
+
+                // 2. Sumas por Método de Pago específico
+                if (!saldosPorMetodoMap.has(metodoNombre)) {
+                    saldosPorMetodoMap.set(metodoNombre, { metodo: metodoNombre, ingresos: 0, egresos: 0, neto: 0 });
+                }
+                const acumulado = saldosPorMetodoMap.get(metodoNombre);
+                if (mov.tipo === 'ingreso') {
+                    acumulado.ingresos += monto;
+                    acumulado.neto += monto;
+                }
+                if (mov.tipo === 'gasto') {
+                    acumulado.egresos += monto;
+                    acumulado.neto -= monto;
                 }
             }
 
@@ -169,13 +195,13 @@ export const consultarCorte = async (req, res) => {
                 concepto: mov.concepto.nombre,
                 tipo: mov.tipo,
                 monto: monto,
-                metodo: metodoNombre, // Ya viaja con "Transferencia", "Tarjeta", etc.
+                metodo: metodoNombre, 
                 nota_movimiento: notaLimpia,
                 usuario: mov.usuario.nombreCompleto
             };
         });
 
-        // El cajón físico SOLO suma los billetes.
+        // Contabilidad exacta de billetes en el cajón
         const efectivoFinal = (efectivoInicial + ingresosEfectivoFisico) - egresosEfectivoFisico;
 
         res.status(200).json({
@@ -184,7 +210,8 @@ export const consultarCorte = async (req, res) => {
                 total_ingresos: totalIngresos,
                 total_egresos: totalEgresos,
                 efectivo_inicial: efectivoInicial,
-                efectivo_final: efectivoFinal
+                efectivo_final: efectivoFinal,
+                desglose_metodos: Array.from(saldosPorMetodoMap.values()).filter(m => m.ingresos > 0 || m.egresos > 0)
             },
             movimientos: desgloseMovimientos 
         });
@@ -442,19 +469,36 @@ export const obtenerCorteDetalle = async (req, res) => {
         let cajaInicial = 0, totalIngresos = 0, totalEgresos = 0;
         let ingresosEfectivoFisico = 0, egresosEfectivoFisico = 0;
 
+        const saldosPorMetodoMap = new Map();
+        metodosCatalogo.forEach((metodo) => {
+            saldosPorMetodoMap.set(metodo.nombre, { metodo: metodo.nombre, ingresos: 0, egresos: 0, neto: 0 });
+        });
+        if (!saldosPorMetodoMap.has('Efectivo')) saldosPorMetodoMap.set('Efectivo', { metodo: 'Efectivo', ingresos: 0, egresos: 0, neto: 0 });
+
         const movimientosFormateados = corte.movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
             const esApertura = mov.concepto.nombre.toLowerCase().includes('apertura');
             const { esEfectivo, metodoNombre } = analizarMetodoPago(mov.nota, metodosCatalogo);
             
             if (esApertura) cajaInicial += monto;
-            else if (mov.tipo === 'ingreso') {
-                totalIngresos += monto;
-                if (esEfectivo) ingresosEfectivoFisico += monto;
-            }
-            else if (mov.tipo === 'gasto') {
-                totalEgresos += monto;
-                if (esEfectivo) egresosEfectivoFisico += monto;
+            else {
+                // Matemática Global
+                if (mov.tipo === 'ingreso') {
+                    totalIngresos += monto;
+                    if (esEfectivo) ingresosEfectivoFisico += monto;
+                }
+                else if (mov.tipo === 'gasto') {
+                    totalEgresos += monto;
+                    if (esEfectivo) egresosEfectivoFisico += monto;
+                }
+
+                // Matemática por Método
+                if (!saldosPorMetodoMap.has(metodoNombre)) {
+                    saldosPorMetodoMap.set(metodoNombre, { metodo: metodoNombre, ingresos: 0, egresos: 0, neto: 0 });
+                }
+                const acumulado = saldosPorMetodoMap.get(metodoNombre);
+                if (mov.tipo === 'ingreso') { acumulado.ingresos += monto; acumulado.neto += monto; }
+                if (mov.tipo === 'gasto') { acumulado.egresos += monto; acumulado.neto -= monto; }
             }
 
             return {
@@ -464,17 +508,15 @@ export const obtenerCorteDetalle = async (req, res) => {
                 concepto: mov.concepto.nombre,
                 tipo: mov.tipo,
                 monto: monto,
-                metodo: metodoNombre, // Mostrará el medio de pago real
+                metodo: metodoNombre,
                 usuario: mov.usuario.nombreCompleto
             };
         });
 
-        // Estructura exacta para las 8 tarjetas de tu modal
         const dataFormateada = {
             id_corte: corte.id,
             folio: `CC-${corte.id.toString().padStart(4, '0')}`,
             estado: corte.status,
-            
             fecha_inicio: corte.inicio,
             fecha_fin: corte.status === 'abierto' ? 'Caja Abierta' : corte.fin,
             usuario: corte.cajero.username,
@@ -484,6 +526,9 @@ export const obtenerCorteDetalle = async (req, res) => {
             total_egresos: totalEgresos,
             caja_inicial: cajaInicial,
             caja_final: cajaInicial + ingresosEfectivoFisico - egresosEfectivoFisico, 
+            
+            // SE AGREGA EL DESGLOSE DE MÉTODOS AL HISTÓRICO
+            desglose_metodos: Array.from(saldosPorMetodoMap.values()).filter(m => m.ingresos > 0 || m.egresos > 0),
             
             observaciones: corte.observaciones || 'Sin observaciones',
             movimientos: movimientosFormateados
