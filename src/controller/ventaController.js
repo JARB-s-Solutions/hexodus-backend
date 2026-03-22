@@ -171,6 +171,10 @@ export const crearVenta = async (req, res) => {
                 conceptoVenta = await tx.concepto.create({ data: { nombre: 'Venta de Productos', tipo: 'ingreso' } });
             }
 
+            const detalleProductosObservacion = detallesVenta
+                .map(item => `${item.nombreProducto} x${item.cantidad}`)
+                .join(', ');
+
             await tx.cajaMovimiento.create({
                 data: {
                     corteId: cajaAbierta.id, // Lo atamos al corte actual (Buena práctica añadida)
@@ -180,7 +184,7 @@ export const crearVenta = async (req, res) => {
                     monto: totalVenta,
                     referenciaTipo: 'venta',
                     referenciaId: nuevaVenta.id,
-                    nota: `[Pago: ID ${metodo_pago_id}] Ingreso por Venta #${nuevaVenta.id}`
+                    nota: `[Pago: ID ${metodo_pago_id}] Venta #${nuevaVenta.id} - Productos: ${detalleProductosObservacion}`
                 }
             });
 

@@ -233,7 +233,7 @@ export const crearSocio = async (req, res) => {
                             monto: precioFinal,
                             referenciaTipo: 'membresia',
                             referenciaId: membresiaAsignada.id,
-                            nota: `[Pago: ID ${metodoPagoIdValido}] Suscripción inicial de socio ${nuevoSocio.codigoSocio}`
+                            nota: `[Pago: ID ${metodoPagoIdValido}] Suscripción inicial de socio ${nuevoSocio.nombreCompleto} (${nuevoSocio.codigoSocio})`
                         }
                     });
                 }
@@ -644,7 +644,7 @@ export const actualizarSocio = async (req, res) => {
                         
                         // 1. Si la anterior estaba pagada, DEVOLVEMOS el dinero contablemente
                         if (estadoAnterior === 'pagado') {
-                            await registrarReverso(membresiaActual.id, precioAnterior, `Reverso por cambio de plan. Socio: ${socioExistente.codigoSocio}`);
+                            await registrarReverso(membresiaActual.id, precioAnterior, `Reverso por cambio de plan. Socio: ${socioExistente.nombreCompleto} (${socioExistente.codigoSocio})`);
                         }
 
                         // 2. Cancelamos la vieja
@@ -664,7 +664,7 @@ export const actualizarSocio = async (req, res) => {
 
                         // 4. Cobramos la nueva (si el UI la mandó como pagada)
                         if (estadoPagoUI === 'pagado') {
-                            await registrarCobro(nuevaMembresia.id, precioFinal, `Cobro de nuevo plan. Socio: ${socioExistente.codigoSocio}`);
+                            await registrarCobro(nuevaMembresia.id, precioFinal, `Cobro de nuevo plan. Socio: ${socioExistente.nombreCompleto} (${socioExistente.codigoSocio})`);
                         }
                     } 
                     // CASO B: MISMO PLAN, SOLO CAMBIARON FECHAS O ESTADO DE PAGO
@@ -683,11 +683,11 @@ export const actualizarSocio = async (req, res) => {
 
                         // Si debía el plan y ahora lo pagan
                         if (estadoAnterior === 'sin_pagar' && estadoPagoUI === 'pagado') {
-                            await registrarCobro(membresiaActual.id, montoOperacion, `Pago atrasado de membresía. Socio: ${socioExistente.codigoSocio}`);
+                            await registrarCobro(membresiaActual.id, montoOperacion, `Pago atrasado de membresía. Socio: ${socioExistente.nombreCompleto} (${socioExistente.codigoSocio})`);
                         } 
                         // Si estaba pagado y se equivocaron (lo regresan a sin pagar)
                         else if (estadoAnterior === 'pagado' && estadoPagoUI === 'sin_pagar') {
-                            await registrarReverso(membresiaActual.id, montoOperacion, `Corrección: Membresía a 'Sin Pagar'. Socio: ${socioExistente.codigoSocio}`);
+                            await registrarReverso(membresiaActual.id, montoOperacion, `Corrección: Membresía a 'Sin Pagar'. Socio: ${socioExistente.nombreCompleto} (${socioExistente.codigoSocio})`);
                         }
                     }
                 } else {
@@ -701,7 +701,7 @@ export const actualizarSocio = async (req, res) => {
                     });
 
                     if (estadoPagoUI === 'pagado') {
-                        await registrarCobro(nuevaMembresia.id, precioFinal, `Suscripción de membresía asignada. Socio: ${socioExistente.codigoSocio}`);
+                        await registrarCobro(nuevaMembresia.id, precioFinal, `Suscripción de membresía asignada. Socio: ${socioExistente.nombreCompleto} (${socioExistente.codigoSocio})`);
                     }
                 }
 
@@ -908,7 +908,7 @@ export const pagarMembresiaPendiente = async (req, res) => {
                     monto: membresia.precioCongelado,
                     referenciaTipo: 'membresia',
                     referenciaId: membresia.id,
-                    nota: `[Pago: ID ${metodoPagoIdValido}] Pago de membresía atrasada. Socio: ${membresia.socio.codigoSocio}`
+                    nota: `[Pago: ID ${metodoPagoIdValido}] Pago de membresía atrasada. Socio: ${membresia.socio.nombreCompleto} (${membresia.socio.codigoSocio})`
                 }
             });
 
@@ -1012,7 +1012,7 @@ export const renovarMembresia = async (req, res) => {
                     monto: precioFinal,
                     referenciaTipo: 'membresia',
                     referenciaId: nuevaMembresia.id,
-                    nota: `[Pago: ID ${metodoPagoIdValido}] Renovación de socio ${socio.codigoSocio} - Plan: ${plan.nombre}`
+                    nota: `[Pago: ID ${metodoPagoIdValido}] Renovación de socio ${socio.nombreCompleto} (${socio.codigoSocio}) - Plan: ${plan.nombre}`
                 }
             });
 
