@@ -430,18 +430,26 @@ export const eliminarMovimiento = async (req, res) => {
             return res.status(404).json({ error: "Movimiento no encontrado." });
         }
 
-        // Prohibido alterar la historia antigua
+        // 🛡️ REGLA CONTABLE 1: Prohibido alterar la historia antigua
         if (movimiento.corte && movimiento.corte.status === 'cerrado') {
             return res.status(403).json({ 
                 error: "Operación denegada. No puedes eliminar un movimiento que pertenece a un corte de caja cerrado. La contabilidad de ese turno ya fue sellada." 
             });
         }
 
-        // Integridad de Doble Partida (No romper ventas ni membresías)
+        // 🛡️ REGLA CONTABLE 2: Integridad de Doble Partida (No romper ventas ni membresías)
         // Solo permitimos borrar referencias tipo 'otro' (manuales) o 'ajuste'.
         if (movimiento.referenciaTipo === 'venta' || movimiento.referenciaTipo === 'membresia') {
             return res.status(403).json({ 
                 error: `Operación denegada. Este es un movimiento automático generado por una ${movimiento.referenciaTipo.toUpperCase()}. Solo se pueden eliminar movimientos manuales.` 
+            });
+        }
+
+        // 🛡️ REGLA CONTABLE 3: Proteger el Fondo de Caja (NUEVO ESCUDO)
+        const esApertura = movimiento.concepto.nombre.toLowerCase().includes('apertura');
+        if (esApertura) {
+            return res.status(403).json({
+                error: "Operación denegada. No puedes eliminar el movimiento de Apertura de Caja. Si cometiste un error con el monto inicial, debes cerrar la caja actual y abrir una nueva."
             });
         }
 
@@ -450,7 +458,7 @@ export const eliminarMovimiento = async (req, res) => {
             where: { id: movimientoId }
         });
 
-        // 3. Dejamos el rastro en la bitácora de auditoría para saber quién borró el dinero
+        // 3. Dejamos el rastro en la bitácora de auditoría
         await registrarLog({
             req,
             accion: 'eliminar',
