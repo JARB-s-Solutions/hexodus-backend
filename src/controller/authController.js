@@ -27,8 +27,14 @@ export const login = async (req, res) => {
             return res.status(403).json({ error: "Usuario inactivo. Contacte al administrador." });
         }
 
+        // Actualizar el reloj de "Último Acceso" en la base de datos
+        await prisma.usuario.update({
+            where: { id: usuario.id },
+            data: { ultimoAcceso: new Date() }
+        });
+
         // Parsear permisos JSON de forma segura
-        const permisosJson = typeof usuario.rol.permisos === 'string' 
+        const permisosJson = typeof usuario.rol.permisos === 'string'
             ? JSON.parse(usuario.rol.permisos) 
             : (usuario.rol.permisos || {});
 
@@ -49,7 +55,7 @@ export const login = async (req, res) => {
 
         await registrarLog({
             req,
-            usuarioId: usuario.id, // 🔥 Le pasamos el ID explícitamente aquí
+            usuarioId: usuario.id, // Le pasamos el ID explícitamente aquí
             accion: 'login',
             modulo: 'seguridad',
             detalles: `Inicio de sesión exitoso del usuario: ${usuario.username}`
