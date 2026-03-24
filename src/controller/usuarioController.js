@@ -2,8 +2,9 @@ import prisma from "../config/prisma.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { registrarLog } from "../services/auditoriaService.js";
+import { ahoraEnMerida, localAUTC } from "../utils/timezone.js"; 
 
-// LISTAR USUARIOS
+// LISTAR USUARIOS (Con KPIs para Dashboard)
 export const listarUsuarios = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -12,7 +13,7 @@ export const listarUsuarios = async (req, res) => {
 
         const { search, rol, activo } = req.query;
 
-        // Construir filtros
+        // Construir filtros para la Tabla
         let whereClause = {};
         
         if (search) {
@@ -26,15 +27,13 @@ export const listarUsuarios = async (req, res) => {
         if (rol) whereClause.rolId = rol;
         
         if (activo !== undefined) {
-            // Si el front pide explícitamente activos o inactivos
             whereClause.status = activo === 'true' ? 'activo' : 'inactivo';
         } else {
-            // Si no hay filtro, trae activos e inactivos, pero NUNCA los eliminados
-            whereClause.status = { not: 'bloqueado' };
+            whereClause.status = { not: 'bloqueado' }; // Ignorar eliminados
         }
 
-        // Ejecutar consultas en paralelo
-        const [totalRecords, usuariosRaw] = await Promise.all([
+        // Ejecutar consultas en paralelo (Tabla + KPIs Globales)
+        const [totalRecords, usuariosRaw, usuariosGlobales] = await Promise.all([
             prisma.usuario.count({ where: whereClause }),
             prisma.usuario.findMany({
                 where: whereClause,
@@ -46,12 +45,77 @@ export const listarUsuarios = async (req, res) => {
                         select: { id: true, nombre: true, color: true, icono: true }
                     }
                 }
+            }),
+            // Consulta súper ligera para calcular los KPIs matemáticos
+            prisma.usuario.findMany({
+                where: { status: { not: 'bloqueado' } },
+                select: {
+                    status: true,
+                    createdAt: true,
+                    ultimoAcceso: true,
+                    rol: { select: { esAdministrador: true } }
+                }
             })
         ]);
 
-        // Mapear a la estructura exacta que pide el Frontend (Markdown)
+        // ==========================================
+        // CÁLCULO DE KPIs Y DASHBOARD
+        // ==========================================
+        const { year, month, day } = ahoraEnMerida();
+        const inicioMes = localAUTC(year, month, 1, 0, 0, 0, 0); // 1ro del mes actual
+        const inicioHoy = localAUTC(year, month, day, 0, 0, 0, 0); // Hoy a medianoche
+
+        let totalUsuarios = 0;
+        let nuevosEsteMes = 0;
+        let activos = 0;
+        let administradores = 0;
+        let activosHoy = 0;
+        let adminsActivosHoy = 0;
+
+        usuariosGlobales.forEach(u => {
+            totalUsuarios++;
+            if (u.createdAt >= inicioMes) nuevosEsteMes++;
+            if (u.status === 'activo') activos++;
+            if (u.rol && u.rol.esAdministrador) administradores++;
+            
+            if (u.ultimoAcceso && u.ultimoAcceso >= inicioHoy) {
+                activosHoy++;
+                if (u.rol && u.rol.esAdministrador) adminsActivosHoy++;
+            }
+        });
+
+        const porcentajeActivos = totalUsuarios > 0 ? ((activos / totalUsuarios) * 100).toFixed(1) : 0;
+        const porcentajeConectados = totalUsuarios > 0 ? ((activosHoy / totalUsuarios) * 100).toFixed(1) : 0;
+
+        const dashboard_stats = {
+            total_usuarios: {
+                valor: totalUsuarios,
+                etiqueta: `+${nuevosEsteMes} este mes`
+            },
+            usuarios_activos: {
+                valor: activos,
+                etiqueta: `${porcentajeActivos}% del total`
+            },
+            administradores: {
+                valor: administradores,
+                etiqueta: "Permisos completos"
+            },
+            activos_hoy: {
+                valor: activosHoy,
+                etiqueta: `${porcentajeConectados}% conectados`
+            },
+            // Datos exactos para el footer (Activos Hoy 24h)
+            footer: {
+                admins: adminsActivosHoy,
+                otros: activosHoy - adminsActivosHoy,
+                total_hoy: activosHoy,
+                total_sistema: totalUsuarios
+            }
+        };
+
+        // Mapear la Tabla exactamente como la espera el Frontend
         const dataFormateada = usuariosRaw.map(u => ({
-            id: u.uid, // Exponemos el UID por seguridad en lugar del ID entero
+            id: u.uid,
             nombre: u.nombreCompleto,
             email: u.email,
             telefono: u.telefono,
@@ -62,8 +126,10 @@ export const listarUsuarios = async (req, res) => {
             fechaCreacion: u.createdAt
         }));
 
+        // Respuesta Final Blindada
         res.status(200).json({
             success: true,
+            dashboard_stats: dashboard_stats, 
             data: {
                 usuarios: dataFormateada,
                 paginacion: {
