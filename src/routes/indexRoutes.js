@@ -20,6 +20,7 @@ import rolRoutes from "./rolRoutes.js";
 import auditoriaRoutes from "./auditoriaRoutes.js";
 import alertaRoutes from "./alertaRoutes.js";
 import backupRoutes from "./backupRoutes.js";
+import configuracionRoutes from "./configuracionRoutes.js";
 
 const router = Router();
 
@@ -44,5 +45,6 @@ router.use("/roles", rolRoutes);
 router.use("/auditoria", auditoriaRoutes);
 router.use("/alertas", alertaRoutes);
 router.use("/backups", backupRoutes);
+router.use("/configuracion", configuracionRoutes);
 
 export default router;
