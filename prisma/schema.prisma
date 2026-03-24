@@ -173,6 +173,7 @@ model Usuario {
   reportesFinancieros  ReporteFinanciero[]  @relation("UsuarioReporte")
   alertasVistas        AlertaSistema[] @relation("UsuarioAlertaVista")
   alertasResueltas     AlertaSistema[] @relation("UsuarioAlertaResuelta")
+  configuracionesActualizadas ConfiguracionSistema[] @relation("UsuarioConfiguracion")
 
   @@map("usuarios")
 }
@@ -864,4 +865,32 @@ model ConfiguracionAlerta {
   updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("configuracion_alertas")
+}
+
+// ==========================================================
+// 17. MÓDULO: CONFIGURACIÓN GLOBAL (APARIENCIA Y TICKET)
+// ==========================================================
+
+model ConfiguracionSistema {
+  id                          Int       @id @default(1) // Singleton (Solo habrá un registro)
+  colorPrincipal              String    @map("color_principal") @db.VarChar(7)
+  colorSecundario             String    @map("color_secundario") @db.VarChar(7)
+  modoTema                    String    @map("modo_tema") @db.VarChar(10)
+  nombreSistema               String    @map("nombre_sistema") @db.VarChar(80)
+  logoSistema                 String?   @map("logo_sistema") @db.Text
+
+  gimnasioNombre              String    @map("gimnasio_nombre") @db.VarChar(120)
+  gimnasioDomicilio           String    @map("gimnasio_domicilio") @db.VarChar(255)
+  gimnasioTelefono            String    @map("gimnasio_telefono") @db.VarChar(30)
+  gimnasioRFC                 String    @map("gimnasio_rfc") @db.VarChar(13)
+  gimnasioLogo                String?   @map("gimnasio_logo") @db.Text
+  ticketFooter                String    @map("ticket_footer") @db.VarChar(100)
+  ticketMensajeAgradecimiento String    @map("ticket_mensaje_agradecimiento") @db.VarChar(200)
+
+  updatedAt                   DateTime  @default(now()) @updatedAt @map("updated_at")
+  updatedBy                   Int?      @map("updated_by")
+
+  usuario                     Usuario?  @relation("UsuarioConfiguracion", fields: [updatedBy], references: [id])
+
+  @@map("configuracion_sistema")
 }
