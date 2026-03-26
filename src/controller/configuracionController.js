@@ -126,7 +126,9 @@ export const actualizarApariencia = async (req, res) => {
         const { colorPrincipal, colorSecundario, modoTema, nombreSistema, logoSistema } = req.body;
 
         try { if (logoSistema) validarBase64(logoSistema, 'logoSistema'); } 
-        catch (err) { return res.status(400).json({ success: false, message: "Logo inválido", errors: [{ detail: err.message }] }); }
+        catch (err) { return res.status(400).json({ success: false, message: "Logo inválido", errors: [{ field: "logo", detail: err.message }] }); }
+
+        await obtenerOcrearConfig();
 
         const configActualizada = await prisma.configuracionSistema.update({
             where: { id: 1 },
@@ -149,7 +151,9 @@ export const actualizarTicket = async (req, res) => {
         const { gimnasioNombre, gimnasioDomicilio, gimnasioTelefono, gimnasioRFC, gimnasioLogo, ticketFooter, ticketMensajeAgradecimiento } = req.body;
 
         try { if (gimnasioLogo) validarBase64(gimnasioLogo, 'gimnasioLogo'); } 
-        catch (err) { return res.status(400).json({ success: false, message: "Logo inválido", errors: [{ detail: err.message }] }); }
+        catch (err) { return res.status(400).json({ success: false, message: "Logo inválido", errors: [{ field: "logo", detail: err.message }] }); }
+
+        await obtenerOcrearConfig();
 
         const configActualizada = await prisma.configuracionSistema.update({
             where: { id: 1 },
@@ -171,6 +175,7 @@ export const actualizarTicket = async (req, res) => {
 // DELETE Logos Individuales
 export const eliminarLogoApariencia = async (req, res) => {
     try {
+        await obtenerOcrearConfig();
         await prisma.configuracionSistema.update({ where: { id: 1 }, data: { logoSistema: null, updatedBy: req.user.id } });
         res.status(200).json({ success: true, message: "Logo de apariencia eliminado" });
     } catch (error) {
@@ -180,6 +185,7 @@ export const eliminarLogoApariencia = async (req, res) => {
 
 export const eliminarLogoTicket = async (req, res) => {
     try {
+        await obtenerOcrearConfig();
         await prisma.configuracionSistema.update({ where: { id: 1 }, data: { gimnasioLogo: null, updatedBy: req.user.id } });
         res.status(200).json({ success: true, message: "Logo del ticket eliminado" });
     } catch (error) {
