@@ -42,9 +42,9 @@ const obtenerOcrearConfig = async () => {
                 colorSecundario: "#00BFFF",
                 modoTema: "dark",
                 nombreSistema: "HEXODUS",
-                gimnasioNombre: "GYM FITNESS",
-                gimnasioDomicilio: "Av. Principal #123, Col. Centro, CP 12345",
-                gimnasioTelefono: "+52 123 456 7890",
+                gimnasioNombre: "HEXODUS FITNESS",
+                gimnasioDomicilio: "Calle Zafiro Mza 1 Lote 8, entre Calle Plata y Brillante, en la Avenida CTM, frente al Soriana, Colonia Minas.",
+                gimnasioTelefono: "+52 981 178 7040",
                 gimnasioRFC: "XAXX010101000",
                 ticketFooter: "¡Gracias por tu visita!",
                 ticketMensajeAgradecimiento: "Te esperamos pronto"
