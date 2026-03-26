@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { 
     getConfiguracion, actualizarConfiguracionTotal, 
     actualizarApariencia, actualizarTicket, 
-    eliminarLogoApariencia, eliminarLogoTicket 
+    eliminarLogoApariencia, eliminarLogoTicket, 
+    restablecerConfiguracion
 } from '../controller/configuracionController.js';
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
@@ -17,6 +18,8 @@ router.use(verificarToken);
 // LECTURA (Requiere permiso: configuracion.ver)
 
 router.get('/sistema', verificarPermiso("configuracion", "ver"), getConfiguracion);
+
+router.post('/sistema/restablecer', verificarPermiso("configuracion", "editar"), restablecerConfiguracion);
 
 
 // EDICIÓN (Requiere permiso: configuracion.editar)
