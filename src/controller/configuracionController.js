@@ -1,9 +1,7 @@
 import prisma from "../config/prisma.js";
 import { registrarLog } from "../services/auditoriaService.js";
 
-// ==========================================
 // HELPERS Y VALIDACIONES
-// ==========================================
 
 // Valida que sea un Base64 válido de imagen y pese menos de 2MB
 const validarBase64 = (base64String, nombreCampo) => {
@@ -30,34 +28,70 @@ const validarBase64 = (base64String, nombreCampo) => {
     return true;
 };
 
+// VALORES POR DEFECTO (FÁBRICA)
+const DEFAULT_CONFIG = {
+    colorPrincipal: "#FF3B3B",
+    colorSecundario: "#00BFFF",
+    modoTema: "dark",
+    nombreSistema: "HEXODUS",
+    logoSistema: null, // Limpiamos el logo al restablecer
+    gimnasioNombre: "HEXODUS FITNESS",
+    gimnasioDomicilio: "Calle Zafiro Mza 1 Lote 8, entre Calle Plata y Brillante, en la Avenida CTM, frente al Soriana, Colonia Minas.",
+    gimnasioTelefono: "+52 981 178 7040",
+    gimnasioRFC: "XAXX010101000",
+    gimnasioLogo: null, // Limpiamos el logo al restablecer
+    ticketFooter: "¡Gracias por tu visita!",
+    ticketMensajeAgradecimiento: "Te esperamos pronto"
+};
+
 // Singleton: Obtiene la config 1 o crea la default si no existe
 const obtenerOcrearConfig = async () => {
     let config = await prisma.configuracionSistema.findUnique({ where: { id: 1 } });
     
     if (!config) {
         config = await prisma.configuracionSistema.create({
-            data: {
-                id: 1,
-                colorPrincipal: "#FF3B3B",
-                colorSecundario: "#00BFFF",
-                modoTema: "dark",
-                nombreSistema: "HEXODUS",
-                gimnasioNombre: "HEXODUS FITNESS",
-                gimnasioDomicilio: "Calle Zafiro Mza 1 Lote 8, entre Calle Plata y Brillante, en la Avenida CTM, frente al Soriana, Colonia Minas.",
-                gimnasioTelefono: "+52 981 178 7040",
-                gimnasioRFC: "XAXX010101000",
-                ticketFooter: "¡Gracias por tu visita!",
-                ticketMensajeAgradecimiento: "Te esperamos pronto"
-            }
+            data: { id: 1, ...DEFAULT_CONFIG }
         });
     }
     return config;
 };
 
+// RESTABLECER DE FÁBRICA
+export const restablecerConfiguracion = async (req, res) => {
+    try {
+        // Aseguramos de que el registro exista antes de actualizar
+        await obtenerOcrearConfig();
 
-// ==========================================
+        const configRestablecida = await prisma.configuracionSistema.update({
+            where: { id: 1 },
+            data: {
+                ...DEFAULT_CONFIG,
+                updatedBy: req.user.id
+            }
+        });
+
+        await registrarLog({ 
+            req, 
+            accion: 'editar', 
+            modulo: 'configuracion', 
+            registroId: 1, 
+            detalles: 'Se restableció la configuración del sistema y ticket a sus valores de fábrica.' 
+        });
+
+        res.status(200).json({ 
+            success: true, 
+            message: "Configuración restablecida a valores de fábrica", 
+            data: configRestablecida 
+        });
+
+    } catch (error) {
+        console.error("Error al restablecer config:", error);
+        res.status(500).json({ success: false, message: "Error interno al restablecer la configuración." });
+    }
+};
+
+
 // ENDPOINTS REST
-// ==========================================
 
 // GET Configuración Unificada
 export const getConfiguracion = async (req, res) => {
