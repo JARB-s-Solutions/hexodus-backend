@@ -28,13 +28,18 @@ const validarBase64 = (base64String, nombreCampo) => {
     return true;
 };
 
+// ==========================================
 // VALORES POR DEFECTO (FÁBRICA)
-const DEFAULT_CONFIG = {
+// ==========================================
+const DEFAULT_APARIENCIA = {
     colorPrincipal: "#FF3B3B",
     colorSecundario: "#00BFFF",
     modoTema: "dark",
     nombreSistema: "HEXODUS",
-    logoSistema: null, // Limpiamos el logo al restablecer
+    logoSistema: null // Limpiamos el logo al restablecer
+};
+
+const DEFAULT_TICKET = {
     gimnasioNombre: "HEXODUS FITNESS",
     gimnasioDomicilio: "Calle Zafiro Mza 1 Lote 8, entre Calle Plata y Brillante, en la Avenida CTM, frente al Soriana, Colonia Minas.",
     gimnasioTelefono: "+52 981 178 7040",
@@ -50,43 +55,63 @@ const obtenerOcrearConfig = async () => {
     
     if (!config) {
         config = await prisma.configuracionSistema.create({
-            data: { id: 1, ...DEFAULT_CONFIG }
+            data: { id: 1, ...DEFAULT_APARIENCIA, ...DEFAULT_TICKET }
         });
     }
     return config;
 };
 
-// RESTABLECER DE FÁBRICA
-export const restablecerConfiguracion = async (req, res) => {
+// ==========================================
+// ENDPOINTS DE RESTABLECIMIENTO (SEPARADOS)
+// ==========================================
+
+// Restablecer SOLO Apariencia
+export const restablecerApariencia = async (req, res) => {
     try {
-        // Aseguramos de que el registro exista antes de actualizar
         await obtenerOcrearConfig();
 
         const configRestablecida = await prisma.configuracionSistema.update({
             where: { id: 1 },
             data: {
-                ...DEFAULT_CONFIG,
+                ...DEFAULT_APARIENCIA,
                 updatedBy: req.user.id
             }
         });
 
         await registrarLog({ 
-            req, 
-            accion: 'editar', 
-            modulo: 'configuracion', 
-            registroId: 1, 
-            detalles: 'Se restableció la configuración del sistema y ticket a sus valores de fábrica.' 
+            req, accion: 'editar', modulo: 'configuracion', registroId: 1, 
+            detalles: 'Se restableció únicamente la apariencia (colores y tema) a sus valores de fábrica.' 
         });
 
-        res.status(200).json({ 
-            success: true, 
-            message: "Configuración restablecida a valores de fábrica", 
-            data: configRestablecida 
-        });
+        res.status(200).json({ success: true, message: "Apariencia restablecida a valores de fábrica", data: configRestablecida });
 
     } catch (error) {
-        console.error("Error al restablecer config:", error);
-        res.status(500).json({ success: false, message: "Error interno al restablecer la configuración." });
+        res.status(500).json({ success: false, message: "Error interno al restablecer la apariencia." });
+    }
+};
+
+// Restablecer SOLO Datos del Ticket
+export const restablecerTicket = async (req, res) => {
+    try {
+        await obtenerOcrearConfig();
+
+        const configRestablecida = await prisma.configuracionSistema.update({
+            where: { id: 1 },
+            data: {
+                ...DEFAULT_TICKET,
+                updatedBy: req.user.id
+            }
+        });
+
+        await registrarLog({ 
+            req, accion: 'editar', modulo: 'configuracion', registroId: 1, 
+            detalles: 'Se restablecieron únicamente los datos del ticket a sus valores de fábrica.' 
+        });
+
+        res.status(200).json({ success: true, message: "Datos del ticket restablecidos a valores de fábrica", data: configRestablecida });
+
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Error interno al restablecer el ticket." });
     }
 };
 
