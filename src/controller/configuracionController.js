@@ -65,6 +65,32 @@ const obtenerOcrearConfig = async () => {
 // ENDPOINTS DE RESTABLECIMIENTO (SEPARADOS)
 // ==========================================
 
+// Restablecer TODO (Apariencia + Ticket)
+export const restablecerSistema = async (req, res) => {
+    try {
+        await obtenerOcrearConfig();
+
+        const configRestablecida = await prisma.configuracionSistema.update({
+            where: { id: 1 },
+            data: {
+                ...DEFAULT_APARIENCIA,
+                ...DEFAULT_TICKET,
+                updatedBy: req.user.id
+            }
+        });
+
+        await registrarLog({ 
+            req, accion: 'editar', modulo: 'configuracion', registroId: 1, 
+            detalles: 'Se restableció la configuración completa (apariencia y datos del ticket) a valores de fábrica.' 
+        });
+
+        res.status(200).json({ success: true, message: "Configuración restablecida a valores de fábrica", data: configRestablecida });
+
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Error interno al restablecer la configuración." });
+    }
+};
+
 // Restablecer SOLO Apariencia
 export const restablecerApariencia = async (req, res) => {
     try {
