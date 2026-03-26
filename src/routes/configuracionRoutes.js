@@ -3,7 +3,7 @@ import {
     getConfiguracion, actualizarConfiguracionTotal, 
     actualizarApariencia, actualizarTicket, 
     eliminarLogoApariencia, eliminarLogoTicket, 
-    restablecerConfiguracion
+    restablecerApariencia, restablecerTicket
 } from '../controller/configuracionController.js';
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
@@ -19,7 +19,6 @@ router.use(verificarToken);
 
 router.get('/sistema', verificarPermiso("configuracion", "ver"), getConfiguracion);
 
-router.post('/sistema/restablecer', verificarPermiso("configuracion", "editar"), restablecerConfiguracion);
 
 
 // EDICIÓN (Requiere permiso: configuracion.editar)
@@ -30,5 +29,11 @@ router.patch('/sistema/ticket', verificarPermiso("configuracion", "editar"), act
 // Borrado de logos
 router.delete('/sistema/logo-apariencia', verificarPermiso("configuracion", "editar"), eliminarLogoApariencia);
 router.delete('/sistema/logo-ticket', verificarPermiso("configuracion", "editar"), eliminarLogoTicket);
+
+// ==========================================
+// RESTABLECER VALORES DE FÁBRICA (SEPARADOS)
+// ==========================================
+router.post('/sistema/apariencia/restablecer', verificarPermiso('configuracion.editar'), restablecerApariencia);
+router.post('/sistema/ticket/restablecer', verificarPermiso('configuracion.editar'), restablecerTicket);
 
 export default router;
