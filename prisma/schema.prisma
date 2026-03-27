@@ -629,23 +629,32 @@ model AuditoriaLog {
 }
 
 model ReporteFinanciero {
-  id              Int      @id @default(autoincrement()) @map("reporte_id")
-  nombre          String   @db.VarChar(120)
-  descripcion     String?  @db.VarChar(255)
-  tipo            String   @db.VarChar(60) 
-  formato         String   @db.VarChar(20) 
-  fechaInicio     DateTime @map("fecha_inicio")
-  fechaFin        DateTime @map("fecha_fin")
-  incluirGraficos Boolean  @default(false) @map("incluir_graficos")
-  incluirDetalles Boolean  @default(false) @map("incluir_detalles")
-  estado          String   @default("Exitoso") @db.VarChar(40) 
-  archivoUrl      String?  @map("archivo_url") @db.VarChar(255)
-  generadoEn      DateTime @default(now()) @map("generado_en")
+  id             Int      @id @default(autoincrement())
+  uuidReporte    String   @unique @default(uuid()) @map("uuid_reporte")
+  nombre         String   @db.VarChar(120)
+  descripcion    String?  @db.Text
+  tipoReporte    String   @map("tipo_reporte") @db.VarChar(50) 
+  formato        String   @db.VarChar(10) // PDF, XLSX, CSV
+  fechaInicio    DateTime @map("fecha_inicio")
+  fechaFin       DateTime @map("fecha_fin")
   
-  // Relación con Usuario
-  usuarioId       Int      @map("usuario_id")
-  usuario         Usuario  @relation("UsuarioReporte", fields: [usuarioId], references: [id])
+  // Opciones de configuración
+  incluirGraficos Boolean @default(false) @map("incluir_graficos")
+  incluirDetalles Boolean @default(true) @map("incluir_detalles")
+  
+  // Archivo y Estado
+  archivoUrl     String?  @map("archivo_url") @db.Text
+  estado         String   @default("completado") @db.VarChar(20) // 🔥 NUEVO: procesando, completado, error
+  
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  
+  usuarioId      Int      @map("usuario_id")
+  createdAt      DateTime @default(now()) @map("created_at")
 
+  usuario        Usuario  @relation("UsuarioReporte", fields: [usuarioId], references: [id])
+
+  @@index([fechaInicio, fechaFin])
+  @@index([estado])
   @@map("reportes_financieros")
 }
 
