@@ -11,23 +11,17 @@ import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.
 
 const router = Router();
 
-// Todas las rutas requieren estar logueado
 router.use(verificarToken);
 
-// ==========================================
 // RUTAS DE VISUALIZACIÓN
-// ==========================================
 router.get("/resumen", verificarPermiso("reportes", "verReporteFinanciero"), obtenerResumenFinanciero);
 router.get("/graficas", verificarPermiso("reportes", "verReporteFinanciero"), obtenerGraficasFinancieras);
 router.get("/comparaciones", verificarPermiso("reportes", "verReporteFinanciero"), obtenerComparacionesFinancieras);
 router.get("/historial-reportes", verificarPermiso("reportes", "verReporteFinanciero"), listarHistorialReportes);
 
-// ==========================================
-// GESTIÓN DE REPORTES
-// ==========================================
+// GESTIÓN DE REPORTES (Permisos Corregidos)
 router.post("/generar-reporte", verificarPermiso("reportes", "crear"), generarReporteFinanciero);
-
-router.get("/descargar-reporte/:id", verificarPermiso("reportes", "crear"), descargarReporte);
-router.delete("/eliminar-reporte/:id", verificarPermiso("reportes", "crear"), eliminarReporte);
+router.get("/descargar-reporte/:id", verificarPermiso("reportes", "descargar"), descargarReporte);
+router.delete("/eliminar-reporte/:id", verificarPermiso("reportes", "eliminar"), eliminarReporte);
 
 export default router;
