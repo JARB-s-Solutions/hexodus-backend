@@ -2,11 +2,19 @@ import prisma from "../config/prisma.js";
 import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr, fechaUTCAMesStr } from "../utils/timezone.js";
 
 const mapaPeriodos = {
+    'dia': 'Hoy',
     'hoy': 'Hoy',
+    'semana': 'Esta Semana',
     'esta semana': 'Esta Semana',
+    'mes': 'Este Mes',
     'este mes': 'Este Mes',
+    'trimestre': 'Este Trimestre',
     'este trimestre': 'Este Trimestre',
+    'semestre': 'Este Semestre',
     'este semestre': 'Este Semestre',
+    'anual': 'Este Ano',
+    'ano': 'Este Ano',
+    'año': 'Este Ano',
     'este año': 'Este Ano',
     'este ano': 'Este Ano',
     'personalizado': 'Personalizado'
