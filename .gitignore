@@ -148,3 +148,7 @@ PROMPTS_UI_DESIGN.md
 scripts
 
 temp
+
+.github
+
+*.sql
