@@ -541,7 +541,6 @@ export const actualizarSocio = async (req, res) => {
             }
 
             // ACTUALIZAR MEMBRESÍA CON LÓGICA CONTABLE (REVERSOS Y COBROS)
-            // ACTUALIZAR MEMBRESÍA CON LÓGICA CONTABLE (REVERSOS Y COBROS)
             if (membresia && membresia.plan_id) {
                 const nuevoPlanId = parseInt(membresia.plan_id);
                 const estadoPagoUI = membresia.estado_pago || 'sin_pagar';
@@ -553,9 +552,15 @@ export const actualizarSocio = async (req, res) => {
                     where: { socioId: socioId }, orderBy: { id: 'desc' }
                 });
 
-                // 🛡️ ESCUDO ANTI-FUGAS DE DINERO AQUÍ 🛡️
-                if (membresiaActual && (membresiaActual.status === 'vencida' || membresiaActual.status === 'cancelada')) {
-                    throw new Error("UX_ERROR:Operación denegada. No puedes editar ni generar devoluciones sobre una membresía que ya está vencida o cancelada. Por favor, utiliza la opción de 'Renovar'.");
+                // 🛡️ ESCUDO ANTI-FUGAS DE DINERO (BLINDADO POR FECHA) 🛡️
+                if (membresiaActual) {
+                    const { year, month, day } = ahoraEnMerida();
+                    const hoy = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+                    const estaVencidaPorFecha = new Date(membresiaActual.fechaFin) < hoy;
+
+                    if (membresiaActual.status === 'vencida' || membresiaActual.status === 'cancelada' || estaVencidaPorFecha) {
+                        throw new Error("UX_ERROR:Operación denegada. No puedes editar ni generar devoluciones sobre una membresía que ya expiró. Por favor, utiliza el botón de 'Renovar'.");
+                    }
                 }
 
                 const planNuevo = await tx.membresiaPlan.findUnique({ where: { id: nuevoPlanId } });
