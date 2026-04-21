@@ -973,11 +973,36 @@ export const renovarMembresia = async (req, res) => {
             const plan = await tx.membresiaPlan.findUnique({ where: { id: parseInt(plan_id) } });
             if (!plan) throw new Error("NOT_FOUND:El plan seleccionado no existe.");
 
-            // Lógica inteligente de fechas: 
-            // Si el front manda una fecha, la usamos. Si no, arranca hoy.
-            const fechaInicioReal = fecha_inicio ? validarFecha(fecha_inicio, 'Inicio de Renovación') : new Date();
+            // MOTOR DE FECHAS INTELIGENTE (STACKING)
+            
+            // 1. Buscamos la membresía que caduca al último
+            const membresiaActual = await tx.membresiaSocio.findFirst({
+                where: { socioId: socio.id },
+                orderBy: { fechaFin: 'desc' } 
+            });
+
+            let fechaInicioReal;
+
+            if (fecha_inicio) {
+                // CASO A: El recepcionista fuerza una fecha manual desde el frontend
+                fechaInicioReal = validarFecha(fecha_inicio, 'Inicio de Renovación');
+            } else {
+                // CASO B: Stacking Automático
+                const { year, month, day } = ahoraEnMerida();
+                const hoyMerida = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+                
+                if (membresiaActual && new Date(membresiaActual.fechaFin) >= hoyMerida) {
+                    // TIENE SALDO A FAVOR: Empieza exactamente donde termina su plan anterior
+                    fechaInicioReal = new Date(membresiaActual.fechaFin);
+                } else {
+                    // ESTÁ VENCIDO O ES NUEVO: Empieza a contar desde hoy
+                    fechaInicioReal = hoyMerida;
+                }
+            }
+
+            // 2. Sumamos los días usando setUTCDate para evitar desfases de horario
             const fechaFinReal = new Date(fechaInicioReal);
-            fechaFinReal.setDate(fechaFinReal.getDate() + plan.duracionDias);
+            fechaFinReal.setUTCDate(fechaFinReal.getUTCDate() + plan.duracionDias);
 
             // Calcular ofertas
             const hoy = new Date();
@@ -993,7 +1018,7 @@ export const renovarMembresia = async (req, res) => {
                     fechaInicio: fechaInicioReal,
                     fechaFin: fechaFinReal,
                     status: 'activa',
-                    estadoPago: 'pagado', // Asumimos que la renovación se paga en el momento
+                    estadoPago: 'pagado', 
                     precioCongelado: precioFinal,
                     asignadoPor: req.user.id
                 }
