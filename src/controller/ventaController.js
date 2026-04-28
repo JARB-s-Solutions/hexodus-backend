@@ -4,15 +4,10 @@ import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaSt
 
 
 // REGISTRAR NUEVA VENTA (Punto de Venta) 
-
 export const crearVenta = async (req, res) => {
     try {
-        const { socio_id, metodo_pago_id, productos } = req.body;
+        const { socio_id, metodo_pago_id, pagos, productos } = req.body;
 
-        // Validaciones iniciales
-        if (!metodo_pago_id) {
-            return res.status(400).json({ error: "Debes seleccionar un método de pago." });
-        }
         if (!productos || !Array.isArray(productos) || productos.length === 0) {
             return res.status(400).json({ error: "El carrito de compras está vacío o es inválido." });
         }
@@ -28,67 +23,48 @@ export const crearVenta = async (req, res) => {
 
         // Consolidación y Validación de Cantidades
         const carritoConsolidadoMap = new Map();
-
         for (const item of productos) {
             const prodId = parseInt(item.producto_id);
             const cantidadParseada = parseInt(item.cantidad);
 
-            // FIX 1: Bloquear cantidades negativas o en cero (Evita inyección de stock y montos negativos)
             if (isNaN(cantidadParseada) || cantidadParseada <= 0) {
-                return res.status(400).json({ 
-                    error: `Operación rechazada. La cantidad para el producto ID ${item.producto_id} debe ser mayor a 0.` 
-                });
+                return res.status(400).json({ error: `Operación rechazada. La cantidad para el producto ID ${item.producto_id} debe ser mayor a 0.` });
             }
-
             if (isNaN(prodId)) {
                 return res.status(400).json({ error: "ID de producto inválido en el carrito." });
             }
 
-            // FIX 2: Consolidar duplicados (Si dan doble clic, sumamos las cantidades en una sola línea)
             if (carritoConsolidadoMap.has(prodId)) {
-                const productoExistente = carritoConsolidadoMap.get(prodId);
-                productoExistente.cantidad += cantidadParseada;
+                carritoConsolidadoMap.get(prodId).cantidad += cantidadParseada;
             } else {
-                carritoConsolidadoMap.set(prodId, {
-                    producto_id: prodId,
-                    cantidad: cantidadParseada
-                });
+                carritoConsolidadoMap.set(prodId, { producto_id: prodId, cantidad: cantidadParseada });
             }
         }
 
-        // Convertimos el Map de vuelta a un arreglo limpio sin duplicados
         const productosConsolidados = Array.from(carritoConsolidadoMap.values());
         const productosIds = productosConsolidados.map(p => p.producto_id);
 
-        // Traer la información real de la BD (Precios y Stock) por seguridad
         const productosDB = await prisma.producto.findMany({
             where: { id: { in: productosIds }, isDeleted: false },
             include: { stock: true }
         });
 
-        // Ahora la comparación de longitud es 100% segura porque quitamos repetidos
         if (productosDB.length !== productosIds.length) {
             return res.status(400).json({ error: "Uno o más productos no existen o están inactivos." });
         }
 
-        // Calcular totales y verificar stock
         let totalVenta = 0;
         const detallesVenta = [];
 
-        // USAMOS EL CARRITO CONSOLIDADO, NO EL ORIGINAL
         for (const itemFront of productosConsolidados) {
             const prodDB = productosDB.find(p => p.id === itemFront.producto_id);
             const cantidadVender = itemFront.cantidad;
-
-            // Verificar Stock
             const stockActual = prodDB.stock ? prodDB.stock.cantidad : 0;
+
             if (stockActual < cantidadVender) {
-                return res.status(400).json({ 
-                    error: `Stock insuficiente para '${prodDB.nombre}'. Solicitas ${cantidadVender} pero solo hay ${stockActual} disponibles.` 
-                });
+                return res.status(400).json({ error: `Stock insuficiente para '${prodDB.nombre}'. Solicitas ${cantidadVender} pero solo hay ${stockActual} disponibles.` });
             }
 
-            // Calcular Precios y Ganancias de esta línea
             const precioVenta = parseFloat(prodDB.precio);
             const costoCompra = parseFloat(prodDB.costo || 0);
             const subtotalLinea = precioVenta * cantidadVender;
@@ -96,111 +72,74 @@ export const crearVenta = async (req, res) => {
 
             totalVenta += subtotalLinea;
 
-            // Armar el objeto para VentaDetalle
             detallesVenta.push({
-                productoId: prodDB.id,
-                codigoProducto: prodDB.codigo, 
-                nombreProducto: prodDB.nombre,
-                cantidad: cantidadVender,
-                precioUnitario: precioVenta,
-                costoUnitario: costoCompra,
-                subtotalLinea: subtotalLinea,
-                gananciaLinea: gananciaLinea
+                productoId: prodDB.id, codigoProducto: prodDB.codigo, nombreProducto: prodDB.nombre,
+                cantidad: cantidadVender, precioUnitario: precioVenta, costoUnitario: costoCompra, subtotalLinea, gananciaLinea
             });
         }
 
-        // Transacción Maestra: Ejecutar todos los movimientos a la vez
+        // LÓGICA DE PAGOS DIVIDIDOS (Retrocompatible)
+        const listaPagos = pagos && pagos.length > 0 ? pagos : (metodo_pago_id ? [{ metodo_pago_id, monto: totalVenta }] : []);
+        
+        if (listaPagos.length === 0) {
+            return res.status(400).json({ error: "Debes seleccionar al menos un método de pago." });
+        }
+
+        const totalPagado = listaPagos.reduce((acc, p) => acc + parseFloat(p.monto), 0);
+        if (Math.abs(totalPagado - totalVenta) > 0.01) {
+            return res.status(400).json({ error: `El total de los pagos ($${totalPagado}) no coincide con el total de la venta ($${totalVenta}).` });
+        }
+
+        // Transacción Maestra
         const resultado = await prisma.$transaction(async (tx) => {
-            
-            // Crear la Venta Principal
             const nuevaVenta = await tx.venta.create({
                 data: {
-                    uuidVenta: crypto.randomUUID(),
-                    usuarioId: req.user.id, 
-                    socioId: socio_id ? parseInt(socio_id) : null, 
-                    status: 'exitosa',
-                    subtotal: totalVenta,
-                    descuento: 0, 
-                    total: totalVenta
+                    uuidVenta: crypto.randomUUID(), usuarioId: req.user.id, socioId: socio_id ? parseInt(socio_id) : null, 
+                    status: 'exitosa', subtotal: totalVenta, descuento: 0, total: totalVenta
                 }
             });
 
-            // Crear los Detalles de la Venta
             for (const detalle of detallesVenta) {
-                await tx.ventaDetalle.create({
-                    data: {
-                        ventaId: nuevaVenta.id,
-                        ...detalle
-                    }
-                });
+                await tx.ventaDetalle.create({ data: { ventaId: nuevaVenta.id, ...detalle } });
 
-                // Descontar del Inventario y dejar bitácora
                 const stockActual = productosDB.find(p => p.id === detalle.productoId).stock;
-                
                 await tx.inventarioStock.update({
                     where: { productoId: detalle.productoId },
-                    data: { cantidad: stockActual.cantidad - detalle.cantidad } // Ahora esto NUNCA sumará por accidente
+                    data: { cantidad: stockActual.cantidad - detalle.cantidad }
                 });
 
                 await tx.inventarioMovimiento.create({
                     data: {
-                        productoId: detalle.productoId,
-                        tipo: 'OUT',
-                        cantidad: detalle.cantidad,
-                        costoUnitario: detalle.costoUnitario,
-                        referenciaTipo: 'venta',
-                        referenciaId: nuevaVenta.id,
-                        usuarioId: req.user.id,
-                        nota: `Venta #${nuevaVenta.id}`
+                        productoId: detalle.productoId, tipo: 'OUT', cantidad: detalle.cantidad, costoUnitario: detalle.costoUnitario,
+                        referenciaTipo: 'venta', referenciaId: nuevaVenta.id, usuarioId: req.user.id, nota: `Venta #${nuevaVenta.id}`
                     }
                 });
             }
 
-            // Registrar el Pago de la Venta
-            await tx.ventaPago.create({
-                data: {
-                    ventaId: nuevaVenta.id,
-                    metodoPagoId: parseInt(metodo_pago_id),
-                    monto: totalVenta
-                }
-            });
-
-            // Registrar INGRESO en la Caja
             let conceptoVenta = await tx.concepto.findFirst({ where: { nombre: 'Venta de Productos' } });
-            if (!conceptoVenta) { 
-                conceptoVenta = await tx.concepto.create({ data: { nombre: 'Venta de Productos', tipo: 'ingreso' } });
+            if (!conceptoVenta) conceptoVenta = await tx.concepto.create({ data: { nombre: 'Venta de Productos', tipo: 'ingreso' } });
+
+            // REGISTRAR CADA PAGO INDIVIDUALMENTE EN CAJA Y VENTAPAGO
+            for (const pago of listaPagos) {
+                const montoPago = parseFloat(pago.monto);
+
+                await tx.ventaPago.create({
+                    data: { ventaId: nuevaVenta.id, metodoPagoId: parseInt(pago.metodo_pago_id), monto: montoPago }
+                });
+
+                await tx.cajaMovimiento.create({
+                    data: {
+                        corteId: cajaAbierta.id, usuarioId: req.user.id, conceptoId: conceptoVenta.id, tipo: 'ingreso',
+                        monto: montoPago, referenciaTipo: 'venta', referenciaId: nuevaVenta.id,
+                        nota: `[Pago: ID ${pago.metodo_pago_id}] Parcialidad Venta #${nuevaVenta.id}`
+                    }
+                });
             }
-
-            const detalleProductosObservacion = detallesVenta
-                .map(item => `${item.nombreProducto} x${item.cantidad}`)
-                .join(', ');
-
-            await tx.cajaMovimiento.create({
-                data: {
-                    corteId: cajaAbierta.id, // Lo atamos al corte actual (Buena práctica añadida)
-                    usuarioId: req.user.id,
-                    conceptoId: conceptoVenta.id,
-                    tipo: 'ingreso',
-                    monto: totalVenta,
-                    referenciaTipo: 'venta',
-                    referenciaId: nuevaVenta.id,
-                    nota: `[Pago: ID ${metodo_pago_id}] Venta #${nuevaVenta.id} - Productos: ${detalleProductosObservacion}`
-                }
-            });
 
             return nuevaVenta;
-        }, {
-            maxWait: 5000,
-            timeout: 20000 
-        });
+        }, { maxWait: 5000, timeout: 20000 });
 
-        res.status(201).json({
-            message: "Venta procesada exitosamente.",
-            data: { 
-                venta_id: resultado.id, 
-                total_cobrado: resultado.total 
-            }
-        });
+        res.status(201).json({ message: "Venta procesada exitosamente.", data: { venta_id: resultado.id, total_cobrado: resultado.total } });
 
     } catch (error) {
         console.error("Error al procesar la venta:", error);
