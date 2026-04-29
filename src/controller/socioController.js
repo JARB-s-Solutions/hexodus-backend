@@ -1343,7 +1343,9 @@ export const renovarMembresia = async (req, res) => {
         fechaInicioReal = validarFecha(fecha_inicio, "Inicio de Renovación");
       } else {
         const { year, month, day } = ahoraEnMerida();
-        const hoyMerida = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        
+        const hoyString = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const hoyMerida = fechaStrAInicio(hoyString);
 
         if (
           membresiaActual &&
@@ -1356,7 +1358,8 @@ export const renovarMembresia = async (req, res) => {
       }
 
       const fechaFinReal = new Date(fechaInicioReal);
-      fechaFinReal.setUTCDate(fechaFinReal.getUTCDate() + plan.duracionDias);
+      
+      fechaFinReal.setDate(fechaFinReal.getDate() + plan.duracionDias);
 
       const hoy = new Date();
       const esOfertaActiva =
