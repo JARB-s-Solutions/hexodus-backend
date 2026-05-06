@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
 import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr } from "../utils/timezone.js";
+import { registrarLog } from "../services/auditoriaService.js";
 
 
 // REGISTRAR NUEVA VENTA (Punto de Venta) 
@@ -159,7 +160,7 @@ export const listarVentas = async (req, res) => {
         const { search, periodo, fecha_inicio, fecha_fin, metodo_pago } = req.query;
 
         // LÓGICA DE FILTROS
-        let whereClause = { isDeleted: false, status: 'exitosa' };
+        let whereClause = { isDeleted: false };
 
         // Filtro por Método de Pago
         if (metodo_pago && metodo_pago !== 'Todos los Metodos') {
@@ -248,7 +249,7 @@ export const listarVentas = async (req, res) => {
             }),
 
             prisma.venta.aggregate({
-                where: whereClause,
+                where: { ...whereClause, status: 'exitosa' }, 
                 _sum: { total: true }
             }),
 
@@ -392,5 +393,110 @@ export const obtenerVenta = async (req, res) => {
     } catch (error) {
         console.error("Error al obtener detalle de venta:", error);
         res.status(500).json({ error: "Error interno al obtener el detalle de la venta." });
+    }
+};
+
+// CANCELAR VENTA (Con Trazabilidad Completa)
+export const cancelarVenta = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const ventaId = parseInt(id);
+
+        if (isNaN(ventaId)) {
+            return res.status(400).json({ error: "ID de venta inválido." });
+        }
+
+        // 1. Buscamos la venta con detalles, pagos y nombres de métodos de pago
+        const venta = await prisma.venta.findUnique({
+            where: { id: ventaId },
+            include: {
+                detalles: true,
+                pagos: {
+                    include: { metodoPago: true } // Para saber el nombre (Efectivo, Tarjeta, etc.)
+                },
+                socio: true
+            }
+        });
+
+        if (!venta) return res.status(404).json({ error: "Venta no encontrada." });
+        if (venta.status === 'cancelada') return res.status(400).json({ error: "Esta venta ya fue cancelada previamente." });
+
+        // VERIFICAR CAJA ABIERTA Y MISMO CORTE
+        // Buscamos el movimiento de caja original de esta venta
+        const movOriginal = await prisma.cajaMovimiento.findFirst({
+            where: { referenciaTipo: 'venta', referenciaId: venta.id, tipo: 'ingreso' },
+            include: { corte: true }
+        });
+
+        if (!movOriginal) throw new Error("UX_ERROR:No se encontró el registro original en caja.");
+        if (movOriginal.corte.status === 'cerrado') {
+            return res.status(403).json({ error: "No se puede cancelar: El corte de caja de esta venta ya fue cerrado." });
+        }
+
+        // 3. PROCESO ATÓMICO DE CANCELACIÓN
+        await prisma.$transaction(async (tx) => {
+            
+            // A. Cambiar estatus de la venta (Sigue visible, pero cancelada)
+            await tx.venta.update({
+                where: { id: venta.id },
+                data: { status: 'cancelada' }
+            });
+
+            // B. Reversión de Inventario
+            for (const item of venta.detalles) {
+                // Devolvemos al stock
+                await tx.inventarioStock.update({
+                    where: { productoId: item.productoId },
+                    data: { cantidad: { increment: item.cantidad } }
+                });
+
+                // Dejamos rastro en movimientos de inventario
+                await tx.inventarioMovimiento.create({
+                    data: {
+                        productoId: item.productoId,
+                        tipo: 'IN', // Re-entrada
+                        cantidad: item.cantidad,
+                        referenciaTipo: 'venta',
+                        referenciaId: venta.id,
+                        usuarioId: req.user.id,
+                        nota: `CANCELACIÓN VENTA #${venta.id} - Devolución de producto`
+                    }
+                });
+            }
+
+            // C. Reversión Contable en Caja (Movimiento por cada método de pago)
+            let concepto = await tx.concepto.findFirst({ where: { nombre: 'Cancelación de Venta' } });
+            if (!concepto) concepto = await tx.concepto.create({ data: { nombre: 'Cancelación de Venta', tipo: 'gasto' } });
+
+            for (const pago of venta.pagos) {
+                await tx.cajaMovimiento.create({
+                    data: {
+                        corteId: movOriginal.corteId,
+                        usuarioId: req.user.id,
+                        conceptoId: concepto.id,
+                        tipo: 'gasto',
+                        monto: pago.monto,
+                        referenciaTipo: 'venta',
+                        referenciaId: venta.id,
+                        nota: `DEVOLUCIÓN [${pago.metodoPago.nombre}] - Cancelación Venta #${venta.id} ${venta.socio ? `(Socio: ${venta.socio.nombreCompleto})` : ''}`
+                    }
+                });
+            }
+        });
+
+        // 4. Registrar en Bitácora de Auditoría
+        await registrarLog({
+            req,
+            accion: 'cancelar',
+            modulo: 'ventas',
+            registroId: venta.id,
+            detalles: `Venta #${venta.id} cancelada. Dinero devuelto a caja y productos regresados al stock.`
+        });
+
+        res.status(200).json({ message: "Venta cancelada exitosamente. Se han generado los movimientos de reversión en caja e inventario." });
+
+    } catch (error) {
+        console.error("Error al cancelar venta:", error);
+        res.status(500).json({ error: error.message.includes("UX_ERROR") ? error.message.split(":")[1] : "Error al procesar la cancelación." });
     }
 };

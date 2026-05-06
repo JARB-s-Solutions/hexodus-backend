@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { crearVenta, listarVentas, obtenerVenta } from "../controller/ventaController.js";
+import { crearVenta, listarVentas, obtenerVenta, cancelarVenta } from "../controller/ventaController.js";
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
 const router = Router();
@@ -17,5 +17,8 @@ router.get("/", verificarPermiso("ventas", "ver"), listarVentas);
 
 // Endpoint para obtener detalle de una venta específica
 router.get("/:id", verificarPermiso("ventas", "ver"), obtenerVenta);
+
+// Ruta DELETE para cancelar, protegida por permiso de 'eliminar' en 'ventas'
+router.delete("/:id", verificarPermiso("ventas", "eliminar"), cancelarVenta);
 
 export default router;
