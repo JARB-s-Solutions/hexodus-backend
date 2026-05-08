@@ -380,6 +380,7 @@ export const obtenerVenta = async (req, res) => {
             cliente: venta.socio ? venta.socio.nombreCompleto : 'Público General',
             fecha_hora: venta.fechaVenta,
             metodo_pago: metodoPago,
+            status: venta.status,
             total: parseFloat(venta.total),
             total_articulos: cantidadTotalArticulos,
             productos: productosFormateados
