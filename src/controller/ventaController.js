@@ -318,7 +318,8 @@ export const listarVentas = async (req, res) => {
                 productos_resumen: resumenProductos,
                 total: parseFloat(venta.total),
                 fecha_hora: venta.fechaVenta,
-                metodo_pago: venta.pagos.length > 0 ? venta.pagos[0].metodoPago.nombre : 'No registrado',
+                //Mapeamos y unimos todos los métodos de pago (ej. "Efectivo + Tarjeta")
+                metodo_pago: venta.pagos.length > 0 ? venta.pagos.map(p => p.metodoPago.nombre).join(' + ') : 'No registrado',
                 status: venta.status
             };
         });
@@ -363,7 +364,10 @@ export const obtenerVenta = async (req, res) => {
             return res.status(404).json({ error: "Venta no encontrada o eliminada." });
         }
 
-        const metodoPago = venta.pagos.length > 0 ? venta.pagos[0].metodoPago.nombre : 'No registrado';
+        // Unimos dinámicamente los métodos para el modal de detalles
+        const metodoPago = venta.pagos.length > 0 
+            ? venta.pagos.map(p => p.metodoPago.nombre).join(' + ') 
+            : 'No registrado';
         const cantidadTotalArticulos = venta.detalles.reduce((acc, det) => acc + det.cantidad, 0);
 
         const productosFormateados = venta.detalles.map(detalle => ({
@@ -470,13 +474,17 @@ export const cancelarVenta = async (req, res) => {
             if (!concepto) concepto = await tx.concepto.create({ data: { nombre: 'Cancelación de Venta', tipo: 'gasto' } });
 
             for (const pago of venta.pagos) {
+                // Forzar a Float. Si Prisma recibe un tipo incompatible,
+                // aborta el registro del segundo método. Esto garantiza que pase.
+                const montoReversion = parseFloat(pago.monto);
+
                 await tx.cajaMovimiento.create({
                     data: {
                         corteId: movOriginal.corteId,
                         usuarioId: req.user.id,
                         conceptoId: concepto.id,
                         tipo: 'gasto',
-                        monto: pago.monto,
+                        monto: montoReversion, 
                         referenciaTipo: 'venta',
                         referenciaId: venta.id,
                         nota: `DEVOLUCIÓN [${pago.metodoPago.nombre}] - Cancelación Venta #${venta.id} ${venta.socio ? `(Socio: ${venta.socio.nombreCompleto})` : ''}`
