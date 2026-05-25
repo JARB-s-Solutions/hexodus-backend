@@ -153,8 +153,12 @@ export const listarMovimientos = async (req, res) => {
             });
 
             if (metodoObj) {
+                // Busca tanto el formato normal como el formato de cancelación
                 andConditions.push({ 
-                    nota: { contains: `[Pago: ID ${metodoObj.id}]` } 
+                    OR: [
+                        { nota: { contains: `[Pago: ID ${metodoObj.id}]` } },
+                        { nota: { contains: `DEVOLUCIÓN [${metodoObj.nombre}]` } }
+                    ]
                 });
             } else {
                 // Si buscan un método que no existe, forzamos cero resultados
@@ -217,14 +221,22 @@ export const listarMovimientos = async (req, res) => {
             let metodoPagoStr = "Efectivo"; 
             let notaLimpia = mov.nota || 'Sin notas adicionales';
 
-            const match = notaLimpia.match(/\[Pago: ID (\d+)\]/);
-            if (match) {
-                const metodoId = parseInt(match[1]);
+            const matchId = notaLimpia.match(/\[Pago: ID (\d+)\]/);
+            const matchDev = notaLimpia.match(/DEVOLUCIÓN \[([^\]]+)\]/i);
+
+            if (matchId) {
+                const metodoId = parseInt(matchId[1]);
                 const metodoObj = metodosCatalogo.find(m => m.id === metodoId);
                 if (metodoObj) {
                     metodoPagoStr = metodoObj.nombre;
                 }
                 notaLimpia = notaLimpia.replace(/\[Pago: ID \d+\]\s*-?\s*/, '').trim();
+            } else if (matchDev) {
+                const nombre = matchDev[1];
+                const metodoObj = metodosCatalogo.find(m => m.nombre.toLowerCase() === nombre.toLowerCase());
+                if (metodoObj) {
+                    metodoPagoStr = metodoObj.nombre;
+                }
             }
 
             const p = partesEnMerida(mov.fecha);
