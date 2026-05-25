@@ -124,16 +124,17 @@ export const crearVenta = async (req, res) => {
             for (const pago of listaPagos) {
                 const montoPago = parseFloat(pago.monto);
 
+                // La tabla VentaPago SI tiene metodoPagoId, aquí se guarda la relación real
                 await tx.ventaPago.create({
                     data: { ventaId: nuevaVenta.id, metodoPagoId: parseInt(pago.metodo_pago_id), monto: montoPago }
                 });
 
+                // La tabla CajaMovimiento NO lo tiene, usamos la nota para el historial
                 await tx.cajaMovimiento.create({
                     data: {
                         corteId: cajaAbierta.id, 
                         usuarioId: req.user.id, 
                         conceptoId: conceptoVenta.id, 
-                        metodoPagoId: parseInt(pago.metodo_pago_id), // Decirle a la caja que es Tarjeta
                         tipo: 'ingreso',
                         monto: montoPago, 
                         referenciaTipo: 'venta', 
@@ -485,9 +486,8 @@ export const cancelarVenta = async (req, res) => {
                         corteId: movOriginal.corteId,
                         usuarioId: req.user.id,
                         conceptoId: concepto.id,
-                        metodoPagoId: pago.metodoPagoId, // Revertir exactamente a la Tarjeta
                         tipo: 'gasto',
-                        monto: parseFloat(pago.monto), // Forzar a decimal para Prisma
+                        monto: parseFloat(pago.monto), // Esto garantiza que la suma matemática cuadre
                         referenciaTipo: 'venta',
                         referenciaId: venta.id,
                         nota: `DEVOLUCIÓN [${pago.metodoPago.nombre}] - Cancelación Venta #${venta.id} ${venta.socio ? `(Socio: ${venta.socio.nombreCompleto})` : ''}`
