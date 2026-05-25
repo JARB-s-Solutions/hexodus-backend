@@ -8,15 +8,29 @@ const analizarMetodoPago = (nota, metodosCatalogo) => {
     let metodoNombre = "Efectivo";
     if (!nota) return { esEfectivo, metodoNombre };
     
-    const match = nota.match(/\[Pago: ID (\d+)\]/);
-    if (match) {
-        const metodoObj = metodosCatalogo.find(m => m.id === parseInt(match[1]));
+    // 1. Intentar buscar formato estándar [Pago: ID X]
+    const matchId = nota.match(/\[Pago: ID (\d+)\]/);
+    if (matchId) {
+        const metodoObj = metodosCatalogo.find(m => m.id === parseInt(matchId[1]));
         if (metodoObj) {
             metodoNombre = metodoObj.nombre;
-            // Si el nombre no incluye la palabra 'efectivo', es dinero digital
             if (!metodoObj.nombre.toLowerCase().includes('efectivo')) esEfectivo = false;
         }
+        return { esEfectivo, metodoNombre };
     }
+
+    // 2. Intentar buscar formato de cancelaciones DEVOLUCIÓN [Nombre]
+    const matchDev = nota.match(/DEVOLUCIÓN \[([^\]]+)\]/i);
+    if (matchDev) {
+        const nombreMatch = matchDev[1];
+        const metodoObj = metodosCatalogo.find(m => m.nombre.toLowerCase() === nombreMatch.toLowerCase());
+        if (metodoObj) {
+            metodoNombre = metodoObj.nombre;
+            if (!metodoObj.nombre.toLowerCase().includes('efectivo')) esEfectivo = false;
+        }
+        return { esEfectivo, metodoNombre };
+    }
+
     return { esEfectivo, metodoNombre };
 };
 

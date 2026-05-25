@@ -490,7 +490,7 @@ export const cancelarVenta = async (req, res) => {
                         monto: parseFloat(pago.monto), // Esto garantiza que la suma matemática cuadre
                         referenciaTipo: 'venta',
                         referenciaId: venta.id,
-                        nota: `DEVOLUCIÓN [${pago.metodoPago.nombre}] - Cancelación Venta #${venta.id} ${venta.socio ? `(Socio: ${venta.socio.nombreCompleto})` : ''}`
+                        nota: `[Pago: ID ${pago.metodoPagoId}] DEVOLUCIÓN - Cancelación Venta #${venta.id} ${venta.socio ? `(Socio: ${venta.socio.nombreCompleto})` : ''}`
                     }
                 });
             }
