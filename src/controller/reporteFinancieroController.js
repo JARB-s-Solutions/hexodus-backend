@@ -67,16 +67,31 @@ export const generarReporteFinanciero = async (req, res) => {
         let totalIngresos = 0, totalGastos = 0;
         const filasProcesadas = movimientos.map(mov => {
             const monto = parseFloat(mov.monto);
-            if (mov.tipo === 'ingreso') totalIngresos += monto;
-            if (mov.tipo === 'gasto') totalGastos += monto;
+            const nombreConcepto = mov.concepto ? mov.concepto.nombre.toLowerCase() : '';
+            
+            // DETECCIÓN INTELIGENTE: Verificar si es apertura/fondo de caja
+            const esApertura = nombreConcepto.includes('apertura') || nombreConcepto.includes('fondo de caja');
+            
+            let tipoVisual = '';
+
+            if (esApertura) {
+                tipoVisual = 'Apertura de Caja'; // Se categoriza de forma independiente
+                // NO se suma a totalIngresos para no inflar las métricas
+            } else if (mov.tipo === 'ingreso') {
+                totalIngresos += monto;
+                tipoVisual = 'Ingreso';
+            } else if (mov.tipo === 'gasto') {
+                totalGastos += monto;
+                tipoVisual = 'Egreso';
+            }
 
             return {
                 folio: `MOV-${mov.id}`,
                 fecha: fechaUTCAISOEnMerida(mov.fecha).replace('T', ' '),
-                tipo: mov.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
-                concepto: mov.concepto.nombre,
+                tipo: tipoVisual,
+                concepto: mov.concepto ? mov.concepto.nombre : 'Sin Concepto',
                 monto: monto,
-                responsable: mov.usuario.nombreCompleto
+                responsable: mov.usuario ? mov.usuario.nombreCompleto : 'Sistema'
             };
         });
 
