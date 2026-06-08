@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { 
-    getConfiguracion, actualizarConfiguracionTotal, 
-    actualizarApariencia, actualizarTicket, 
-    eliminarLogoApariencia, eliminarLogoTicket, 
+import {
+    getConfiguracion, getConfiguracionRuntime, actualizarConfiguracionTotal,
+    actualizarApariencia, actualizarTicket,
+    eliminarLogoApariencia, eliminarLogoTicket,
     restablecerSistema, restablecerApariencia, restablecerTicket
 } from '../controller/configuracionController.js';
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
@@ -15,8 +15,11 @@ const router = Router();
 router.use(verificarToken);
 
 
-// LECTURA (Requiere permiso: configuracion.ver)
+// LECTURA GLOBAL DE RUNTIME (solo requiere autenticación)
+// Usada por tema, logos y tickets en cualquier módulo.
+router.get('/sistema/runtime', getConfiguracionRuntime);
 
+// LECTURA ADMINISTRATIVA (Requiere permiso: configuracion.ver)
 router.get('/sistema', verificarPermiso("configuracion", "ver"), getConfiguracion);
 
 
