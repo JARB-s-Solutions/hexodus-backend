@@ -332,7 +332,6 @@ export const generarReporteFinanciero = async (req, res) => {
             formato,
             fecha_inicio,
             fecha_fin,
-            incluir_graficos = true,
             incluir_detalles = true,
         } = req.body;
 
@@ -347,7 +346,7 @@ export const generarReporteFinanciero = async (req, res) => {
         const inicioLocal = fechaStrAInicio(fecha_inicio);
         const finLocal = fechaStrAFin(fecha_fin);
         const incluirDetalles = normalizarBoolean(incluir_detalles, true);
-        const incluirGraficos = normalizarBoolean(incluir_graficos, true);
+        const incluirGraficos = false;
 
         if (Number.isNaN(inicioLocal.getTime()) || Number.isNaN(finLocal.getTime())) {
             return res.status(400).json({ error: "El rango de fechas no es válido." });
