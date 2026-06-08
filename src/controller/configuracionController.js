@@ -61,6 +61,22 @@ const obtenerOcrearConfig = async () => {
     return config;
 };
 
+const mapearConfiguracionRuntime = (config) => ({
+    colorPrincipal: config.colorPrincipal,
+    colorSecundario: config.colorSecundario,
+    modoTema: config.modoTema,
+    nombreSistema: config.nombreSistema,
+    logoSistema: config.logoSistema,
+    gimnasioNombre: config.gimnasioNombre,
+    gimnasioDomicilio: config.gimnasioDomicilio,
+    gimnasioTelefono: config.gimnasioTelefono,
+    gimnasioRFC: config.gimnasioRFC,
+    gimnasioLogo: config.gimnasioLogo,
+    ticketFooter: config.ticketFooter,
+    ticketMensajeAgradecimiento: config.ticketMensajeAgradecimiento,
+    updatedAt: config.updatedAt
+});
+
 // ==========================================
 // ENDPOINTS DE RESTABLECIMIENTO (SEPARADOS)
 // ==========================================
@@ -157,6 +173,24 @@ export const getConfiguracion = async (req, res) => {
     } catch (error) {
         console.error("Error al obtener config:", error);
         res.status(500).json({ success: false, message: "Error interno al obtener la configuración." });
+    }
+};
+
+// GET Configuración Runtime
+// Lectura global para usuarios autenticados: tema, logos y datos de ticket.
+// No expone metadatos administrativos como updatedBy ni relaciones de usuario.
+export const getConfiguracionRuntime = async (req, res) => {
+    try {
+        const config = await obtenerOcrearConfig();
+
+        res.status(200).json({
+            success: true,
+            message: "Configuración runtime obtenida",
+            data: mapearConfiguracionRuntime(config)
+        });
+    } catch (error) {
+        console.error("Error al obtener config runtime:", error);
+        res.status(500).json({ success: false, message: "Error interno al obtener la configuración runtime." });
     }
 };
 
