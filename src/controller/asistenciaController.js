@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.js";
-import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida } from "../utils/timezone.js";
+import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida, fechaUTCADiaStr } from "../utils/timezone.js";
 
 const calcularDistancia = (desc1, desc2) => {
     if (!desc1 || !desc2 || desc1.length !== desc2.length) return 1.0; 
@@ -112,7 +112,7 @@ export const validarAsistenciaFacial = async (req, res) => {
                     codigo_socio: bestMatch.codigoSocio,
                     nombre_completo: bestMatch.nombreCompleto,
                     membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin plan',
-                    fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null,
+                    fecha_fin_membresia: membresiaActual ? fechaUTCADiaStr(membresiaActual.fechaFin) : null,
                     estado_pago: membresiaActual ? membresiaActual.estadoPago : 'N/A'
                 },
                 asistencia: {
@@ -438,7 +438,7 @@ export const validarAsistenciaHuella = async (req, res) => {
                     socio: {
                         nombre_completo: socio.nombreCompleto,
                         codigo_socio: socio.codigoSocio,
-                        fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null
+                        fecha_fin_membresia: membresiaActual ? fechaUTCADiaStr(membresiaActual.fechaFin) : null
                     },
                     sugerencia: "Por favor, renueva tu membresía en recepción."
                 }
@@ -458,7 +458,7 @@ export const validarAsistenciaHuella = async (req, res) => {
             data: {
                 socio: {
                     id: socio.id, codigo_socio: socio.codigoSocio, nombre_completo: socio.nombreCompleto,
-                    foto_perfil_url: socio.fotoUrl, membresia: membresiaActual.plan.nombre, fecha_fin_membresia: membresiaActual.fechaFin
+                    foto_perfil_url: socio.fotoUrl, membresia: membresiaActual.plan.nombre, fecha_fin_membresia: fechaUTCADiaStr(membresiaActual.fechaFin)
                 },
                 asistencia: {
                     id: nuevoAcceso.id, tipo: nuevoAcceso.tipo, timestamp: fechaUTCAISOEnMerida(nuevoAcceso.fechaHora), metodo: 'huella',
