@@ -3,6 +3,7 @@ import {
     crearSocio, 
     cotizarMembresia, 
     listarSocios, 
+    exportarSocios,
     obtenerSocio, 
     actualizarSocio, 
     eliminarSocio,
@@ -27,6 +28,7 @@ router.post("/cotizar", verificarPermiso("socios", "ver"), cotizarMembresia);
 
 // Listado general y perfil individual
 router.get("/", verificarPermiso("socios", "ver"), listarSocios);
+router.get("/exportar", verificarPermiso("socios", "exportar"), exportarSocios);
 router.get("/:id", verificarPermiso("socios", "ver"), obtenerSocio);
 
 // Modificación y baja (Soft Delete)
