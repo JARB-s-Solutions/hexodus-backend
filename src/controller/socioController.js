@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
+import ExcelJS from "exceljs";
 import { registrarLog } from "../services/auditoriaService.js";
 import {
   ahoraEnMerida,
@@ -47,6 +48,19 @@ const formatoLocalISO = (date) => {
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}T${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}:${String(p.second).padStart(2, "0")}`;
 };
 
+const formatoLocalFecha = (date) => {
+  if (!date) return "";
+  const p = partesEnMerida(date);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
+};
+
+const normalizarTexto = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
 const ultimoDiaDelMes = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
 
 const agregarMesesCalendario = (fechaInicio, meses, diaCorte) => {
@@ -78,6 +92,122 @@ const calcularFechaFinMembresia = (fechaInicio, duracionDias, diaCorte) => {
   const fin = new Date(fechaInicio);
   fin.setDate(fin.getDate() + dias);
   return fin;
+};
+
+const obtenerHoyInicioMerida = () => {
+  const { year, month, day } = ahoraEnMerida();
+  return fechaStrAInicio(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+};
+
+const obtenerEstadoVigenciaMembresia = (membresia, hoy, limite7Dias) => {
+  if (!membresia) return "sin_membresia";
+  if (new Date(membresia.fechaFin) < hoy) return "vencida";
+  if (new Date(membresia.fechaFin) <= limite7Dias) return "por_vencer";
+  return "vigente";
+};
+
+const obtenerEstadoContratoExport = (contrato, hoy) => {
+  if (!contrato) return "sin_contrato";
+  if (new Date(contrato.fechaFin) < hoy) return "vencido";
+
+  const limite30Dias = new Date(hoy);
+  limite30Dias.setDate(limite30Dias.getDate() + 30);
+
+  if (new Date(contrato.fechaFin) <= limite30Dias) return "por_vencer";
+  return "activo";
+};
+
+const labelVigencia = {
+  vigente: "Vigente",
+  por_vencer: "Por vencer",
+  vencida: "Vencida",
+  sin_membresia: "Sin membresía",
+};
+
+const labelContrato = {
+  activo: "Activo",
+  por_vencer: "Por vencer",
+  vencido: "Vencido",
+  sin_contrato: "Sin contrato",
+};
+
+const normalizarGeneroFiltro = (genero) => {
+  const key = String(genero || "todos").trim();
+  const map = { M: "Masculino", F: "Femenino", O: "Otro" };
+  return map[key] || key;
+};
+
+const aplicarEstiloHeader = (row) => {
+  row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  row.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+    cell.alignment = { vertical: "middle", horizontal: "center" };
+  });
+};
+
+const ajustarColumnas = (worksheet) => {
+  worksheet.columns.forEach((column) => {
+    let maxLength = 12;
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      maxLength = Math.max(maxLength, Math.min(String(cell.value ?? "").length + 2, 44));
+    });
+    column.width = maxLength;
+  });
+};
+
+const agregarTablaSocios = (worksheet, socios) => {
+  aplicarEstiloHeader(worksheet.addRow([
+    "Código",
+    "Socio",
+    "Género",
+    "Teléfono",
+    "Correo",
+    "Plan",
+    "Vigencia",
+    "Estado pago",
+    "Inicio membresía",
+    "Vencimiento",
+    "Precio congelado",
+    "Último pago",
+    "Método último pago",
+    "Contrato firmado",
+    "Vigencia contrato",
+    "Inicio contrato",
+    "Fin contrato",
+    "Registro",
+  ]));
+
+  socios.forEach((socio) => {
+    const row = worksheet.addRow([
+      socio.codigo,
+      socio.nombre,
+      socio.genero,
+      socio.telefono,
+      socio.correo,
+      socio.plan,
+      socio.vigenciaLabel,
+      socio.estadoPago,
+      socio.fechaInicioMembresia,
+      socio.fechaFinMembresia,
+      socio.precioCongelado,
+      socio.ultimoPagoMonto,
+      socio.ultimoPagoMetodo,
+      socio.contratoFirmado,
+      socio.contratoLabel,
+      socio.fechaInicioContrato,
+      socio.fechaFinContrato,
+      socio.fechaRegistro,
+    ]);
+    row.getCell(11).numFmt = '"$"#,##0.00';
+    row.getCell(12).numFmt = '"$"#,##0.00';
+  });
+
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  worksheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: Math.max(1, socios.length + 1), column: 18 },
+  };
+  ajustarColumnas(worksheet);
 };
 
 const validarMetodoPago = async (tx, metodoId) => {
@@ -574,6 +704,219 @@ export const listarSocios = async (req, res) => {
     res
       .status(500)
       .json({ error: "Error interno al obtener la lista de socios." });
+  }
+};
+
+// EXPORTAR SOCIOS Y ESTADO DE MEMBRESÍAS
+export const exportarSocios = async (req, res) => {
+  try {
+    const {
+      search,
+      vigencia = "todos",
+      membresia = "todos",
+      genero = "todos",
+      contrato_firma = "todos",
+      contrato_vigencia = "todos",
+      fecha_desde,
+      fecha_hasta,
+    } = req.query;
+
+    const hoy = obtenerHoyInicioMerida();
+    const limite7Dias = new Date(hoy);
+    limite7Dias.setDate(limite7Dias.getDate() + 7);
+
+    const sociosRaw = await prisma.socio.findMany({
+      where: { isDeleted: false },
+      orderBy: { nombreCompleto: "asc" },
+      include: {
+        membresias: {
+          include: {
+            plan: true,
+            pagos: {
+              include: { metodoPago: { select: { nombre: true } } },
+              orderBy: { pagadoEn: "desc" },
+              take: 1,
+            },
+          },
+          orderBy: { fechaFin: "desc" },
+          take: 1,
+        },
+        contratos: {
+          orderBy: { fechaFin: "desc" },
+          take: 1,
+        },
+      },
+    });
+
+    const searchKey = normalizarTexto(search);
+    const membresiaKey = normalizarTexto(membresia);
+    const generoFiltro = normalizarGeneroFiltro(genero);
+    const fechaDesde = typeof fecha_desde === "string" && fecha_desde ? fecha_desde : "";
+    const fechaHasta = typeof fecha_hasta === "string" && fecha_hasta ? fecha_hasta : "";
+
+    const sociosMapeados = sociosRaw.map((socio) => {
+      const membresiaActual = socio.membresias[0] || null;
+      const contratoActual = socio.contratos[0] || null;
+      const ultimoPago = membresiaActual?.pagos?.[0] || null;
+      const vigenciaEstado = obtenerEstadoVigenciaMembresia(membresiaActual, hoy, limite7Dias);
+      const contratoEstado = obtenerEstadoContratoExport(contratoActual, hoy);
+
+      return {
+        id: socio.id,
+        codigo: socio.codigoSocio,
+        nombre: socio.nombreCompleto,
+        genero: socio.genero || "N/A",
+        telefono: socio.telefono || "",
+        correo: socio.correo || "",
+        plan: membresiaActual?.plan?.nombre || "Sin membresía",
+        planKey: normalizarTexto(membresiaActual?.plan?.nombre || ""),
+        vigenciaEstado,
+        vigenciaLabel: labelVigencia[vigenciaEstado] || vigenciaEstado,
+        estadoPago: membresiaActual?.estadoPago || "N/A",
+        fechaInicioMembresia: membresiaActual ? formatoLocalFecha(membresiaActual.fechaInicio) : "",
+        fechaFinMembresia: membresiaActual ? formatoLocalFecha(membresiaActual.fechaFin) : "",
+        precioCongelado: membresiaActual?.precioCongelado ? Number(membresiaActual.precioCongelado) : 0,
+        ultimoPagoMonto: ultimoPago ? Number(ultimoPago.monto) : 0,
+        ultimoPagoMetodo: ultimoPago?.metodoPago?.nombre || "",
+        contratoFirmado: contratoActual ? "Sí" : "No",
+        contratoEstado,
+        contratoLabel: labelContrato[contratoEstado] || contratoEstado,
+        fechaInicioContrato: contratoActual ? formatoLocalFecha(contratoActual.fechaInicio) : "",
+        fechaFinContrato: contratoActual ? formatoLocalFecha(contratoActual.fechaFin) : "",
+        fechaRegistro: formatoLocalFecha(socio.createdAt),
+      };
+    });
+
+    const sociosFiltrados = sociosMapeados.filter((socio) => {
+      if (searchKey) {
+        const searchable = normalizarTexto(`${socio.codigo} ${socio.nombre} ${socio.telefono} ${socio.correo}`);
+        if (!searchable.includes(searchKey)) return false;
+      }
+
+      if (vigencia !== "todos") {
+        if (vigencia === "vencida") {
+          if (!["vencida", "sin_membresia"].includes(socio.vigenciaEstado)) return false;
+        } else if (socio.vigenciaEstado !== vigencia) {
+          return false;
+        }
+      }
+
+      if (membresiaKey && membresiaKey !== "todos" && socio.planKey !== membresiaKey) return false;
+      if (generoFiltro !== "todos" && socio.genero !== generoFiltro) return false;
+
+      if (contrato_firma === "firmado" && socio.contratoFirmado !== "Sí") return false;
+      if (contrato_firma === "pendiente" && socio.contratoFirmado !== "No") return false;
+
+      if (contrato_vigencia !== "todos" && socio.contratoEstado !== contrato_vigencia) return false;
+
+      if (fechaDesde || fechaHasta) {
+        if (!socio.fechaFinMembresia) return false;
+        if (fechaDesde && socio.fechaFinMembresia < fechaDesde) return false;
+        if (fechaHasta && socio.fechaFinMembresia > fechaHasta) return false;
+      }
+
+      return true;
+    });
+
+    const resumen = sociosFiltrados.reduce(
+      (acc, socio) => {
+        acc.total += 1;
+        acc[socio.vigenciaEstado] = (acc[socio.vigenciaEstado] || 0) + 1;
+        acc.totalAdeudoPotencial += socio.estadoPago === "sin_pagar" ? socio.precioCongelado : 0;
+        return acc;
+      },
+      { total: 0, vigente: 0, por_vencer: 0, vencida: 0, sin_membresia: 0, totalAdeudoPotencial: 0 },
+    );
+
+    const resumenPorPlan = new Map();
+    sociosFiltrados.forEach((socio) => {
+      const item = resumenPorPlan.get(socio.plan) || {
+        plan: socio.plan,
+        total: 0,
+        vigentes: 0,
+        porVencer: 0,
+        vencidos: 0,
+        sinMembresia: 0,
+        sinPagar: 0,
+      };
+      item.total += 1;
+      if (socio.vigenciaEstado === "vigente") item.vigentes += 1;
+      if (socio.vigenciaEstado === "por_vencer") item.porVencer += 1;
+      if (socio.vigenciaEstado === "vencida") item.vencidos += 1;
+      if (socio.vigenciaEstado === "sin_membresia") item.sinMembresia += 1;
+      if (socio.estadoPago === "sin_pagar") item.sinPagar += 1;
+      resumenPorPlan.set(socio.plan, item);
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Hexodus";
+    workbook.created = new Date();
+
+    const resumenSheet = workbook.addWorksheet("Resumen");
+    resumenSheet.addRow(["Reporte", "Socios y membresías"]);
+    resumenSheet.addRow(["Generado", formatoLocalISO(new Date())]);
+    resumenSheet.addRow(["Filtros", `Vigencia: ${vigencia} | Membresía: ${membresia} | Género: ${genero}`]);
+    resumenSheet.addRow([]);
+    aplicarEstiloHeader(resumenSheet.addRow(["Indicador", "Valor"]));
+    [
+      ["Socios exportados", resumen.total],
+      ["Vigentes", resumen.vigente],
+      ["Por vencer", resumen.por_vencer],
+      ["Vencidos", resumen.vencida],
+      ["Sin membresía", resumen.sin_membresia],
+      ["Adeudo potencial sin pagar", resumen.totalAdeudoPotencial],
+    ].forEach(([label, value]) => {
+      const row = resumenSheet.addRow([label, value]);
+      if (label === "Adeudo potencial sin pagar") row.getCell(2).numFmt = '"$"#,##0.00';
+    });
+    ajustarColumnas(resumenSheet);
+
+    const sociosSheet = workbook.addWorksheet("Socios");
+    agregarTablaSocios(sociosSheet, sociosFiltrados);
+
+    const vencidosSheet = workbook.addWorksheet("Vencidos");
+    agregarTablaSocios(
+      vencidosSheet,
+      sociosFiltrados.filter((socio) => ["vencida", "sin_membresia"].includes(socio.vigenciaEstado)),
+    );
+
+    const planesSheet = workbook.addWorksheet("Membresías por plan");
+    aplicarEstiloHeader(planesSheet.addRow([
+      "Plan",
+      "Total socios",
+      "Vigentes",
+      "Por vencer",
+      "Vencidos",
+      "Sin membresía",
+      "Sin pagar",
+    ]));
+    Array.from(resumenPorPlan.values())
+      .sort((a, b) => b.total - a.total)
+      .forEach((plan) => {
+        planesSheet.addRow([
+          plan.plan,
+          plan.total,
+          plan.vigentes,
+          plan.porVencer,
+          plan.vencidos,
+          plan.sinMembresia,
+          plan.sinPagar,
+        ]);
+      });
+    planesSheet.views = [{ state: "frozen", ySplit: 1 }];
+    ajustarColumnas(planesSheet);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const fechaArchivo = formatoLocalFecha(new Date());
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="socios_membresias_${fechaArchivo}.xlsx"`);
+    res.setHeader("Content-Length", buffer.length);
+
+    return res.status(200).send(Buffer.from(buffer));
+  } catch (error) {
+    console.error("Error al exportar socios:", error);
+    return res.status(500).json({ error: "Error interno al exportar socios." });
   }
 };
 
