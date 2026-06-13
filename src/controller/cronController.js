@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { fechaUTCADiaStr } from "../utils/timezone.js";
 
 export const ejecutarMantenimientoDiario = async (req, res) => {
     try {
@@ -122,7 +123,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
                             tipo: 'vencimiento_membresia',
                             prioridad: 'media',
                             titulo: `Vencimiento próximo: ${mem.socio.nombreCompleto}`,
-                            descripcion: `La membresía '${mem.plan.nombre}' vencerá el ${mem.fechaFin.toISOString().split('T')[0]}.`,
+                            descripcion: `La membresía '${mem.plan.nombre}' vencerá el ${fechaUTCADiaStr(mem.fechaFin)}.`,
                             socioId: mem.socio.id,
                             membresiaSocioId: mem.id
                         }

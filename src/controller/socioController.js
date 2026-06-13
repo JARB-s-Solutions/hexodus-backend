@@ -4,6 +4,7 @@ import { registrarLog } from "../services/auditoriaService.js";
 import {
   ahoraEnMerida,
   fechaStrAInicio,
+  localAUTC,
   partesEnMerida,
 } from "../utils/timezone.js";
 
@@ -44,6 +45,39 @@ const formatoLocalISO = (date) => {
   if (!date) return null;
   const p = partesEnMerida(date);
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}T${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}:${String(p.second).padStart(2, "0")}`;
+};
+
+const ultimoDiaDelMes = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+const agregarMesesCalendario = (fechaInicio, meses, diaCorte) => {
+  const inicio = partesEnMerida(fechaInicio);
+  const totalMeses = inicio.month - 1 + meses;
+  const targetYear = inicio.year + Math.floor(totalMeses / 12);
+  const targetMonth = (totalMeses % 12) + 1;
+  const targetDay = Math.min(diaCorte || inicio.day, ultimoDiaDelMes(targetYear, targetMonth));
+
+  return localAUTC(
+    targetYear,
+    targetMonth,
+    targetDay,
+    inicio.hour,
+    inicio.minute,
+    inicio.second,
+    0,
+  );
+};
+
+const calcularFechaFinMembresia = (fechaInicio, duracionDias, diaCorte) => {
+  const dias = Number(duracionDias);
+
+  if (Number.isInteger(dias) && dias > 0) {
+    if (dias % 365 === 0) return agregarMesesCalendario(fechaInicio, (dias / 365) * 12, diaCorte);
+    if (dias % 30 === 0) return agregarMesesCalendario(fechaInicio, dias / 30, diaCorte);
+  }
+
+  const fin = new Date(fechaInicio);
+  fin.setDate(fin.getDate() + dias);
+  return fin;
 };
 
 const validarMetodoPago = async (tx, metodoId) => {
@@ -111,8 +145,7 @@ export const cotizarMembresia = async (req, res) => {
     if (isNaN(inicio.getTime()))
       return res.status(400).json({ error: "La fecha de inicio es inválida." });
 
-    const fin = new Date(inicio);
-    fin.setDate(fin.getDate() + plan.duracionDias);
+    const fin = calcularFechaFinMembresia(inicio, plan.duracionDias);
 
     // Calcular Precios y Ofertas en tiempo real
     const hoy = new Date();
@@ -235,12 +268,9 @@ export const crearSocio = async (req, res) => {
             "UX_ERROR:La fecha de inicio de membresía es requerida.",
           );
 
-        let fechaFin = membresia.fecha_vencimiento
+        const fechaFin = membresia.fecha_vencimiento
           ? validarFecha(membresia.fecha_vencimiento, "Fin de Membresía")
-          : new Date(fechaInicio);
-        if (!membresia.fecha_vencimiento) {
-          fechaFin.setDate(fechaFin.getDate() + plan.duracionDias);
-        }
+          : calcularFechaFinMembresia(fechaInicio, plan.duracionDias);
 
         const hoy = new Date();
         const esOfertaActiva =
@@ -596,13 +626,13 @@ export const obtenerSocio = async (req, res) => {
         : "N/A",
       estado_pago: membresiaActual ? membresiaActual.estadoPago : "N/A",
       fecha_inicio_membresia: membresiaActual
-        ? membresiaActual.fechaInicio
+        ? formatoLocalISO(membresiaActual.fechaInicio)
         : null,
-      fecha_fin_membresia: membresiaActual ? membresiaActual.fechaFin : null,
+      fecha_fin_membresia: membresiaActual ? formatoLocalISO(membresiaActual.fechaFin) : null,
       firmo_contrato: tieneContrato ? true : false,
       estado_contrato: contratoActual ? contratoActual.status : "N/A",
-      fecha_inicio_contrato: contratoActual ? contratoActual.fechaInicio : null,
-      fecha_fin_contrato: contratoActual ? contratoActual.fechaFin : null,
+      fecha_inicio_contrato: contratoActual ? formatoLocalISO(contratoActual.fechaInicio) : null,
+      fecha_fin_contrato: contratoActual ? formatoLocalISO(contratoActual.fechaFin) : null,
       biometrico_rostro: socio.faceEncoding ? true : false,
       biometrico_huella: socio.huellaTemplate ? true : false,
       fecha_registro: formatoLocalISO(socio.createdAt),
@@ -797,9 +827,9 @@ export const actualizarSocio = async (req, res) => {
               "Fin de Membresía",
             );
           } else {
-            fechaFinReal = new Date(fechaInicioReal);
-            fechaFinReal.setDate(
-              fechaFinReal.getDate() + planNuevo.duracionDias,
+            fechaFinReal = calcularFechaFinMembresia(
+              fechaInicioReal,
+              planNuevo.duracionDias,
             );
           }
 
@@ -1357,9 +1387,14 @@ export const renovarMembresia = async (req, res) => {
         }
       }
 
-      const fechaFinReal = new Date(fechaInicioReal);
-      
-      fechaFinReal.setDate(fechaFinReal.getDate() + plan.duracionDias);
+      const diaCorteActual = membresiaActual
+        ? partesEnMerida(membresiaActual.fechaInicio).day
+        : undefined;
+      const fechaFinReal = calcularFechaFinMembresia(
+        fechaInicioReal,
+        plan.duracionDias,
+        diaCorteActual,
+      );
 
       const hoy = new Date();
       const esOfertaActiva =

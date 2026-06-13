@@ -28,10 +28,12 @@ const _partes = (date) => {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
         hour12: false
     }).formatToParts(date);
-    return parts.reduce((acc, part) => {
+    const result = parts.reduce((acc, part) => {
         if (part.type !== 'literal') acc[part.type] = Number(part.value);
         return acc;
     }, {});
+    if (result.hour === 24) result.hour = 0;
+    return result;
 };
 
 /** Calcula el offset en ms de la zona TZ para una fecha concreta (DST-aware) */
