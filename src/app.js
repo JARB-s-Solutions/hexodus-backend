@@ -15,7 +15,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // CORS
-app.use(cors());
+app.use(cors({
+    exposedHeaders: ["Content-Disposition", "Content-Length", "Content-Type"]
+}));
 
 // Logging HTTP requests
 const morganFormat = process.env.NODE_ENV === "production" ? "combined" : "dev";
