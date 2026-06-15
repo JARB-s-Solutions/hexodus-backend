@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { crearVenta, listarVentas, obtenerVenta, cancelarVenta } from "../controller/ventaController.js";
+import { crearVenta, listarVentas, exportarVentas, obtenerVenta, cancelarVenta } from "../controller/ventaController.js";
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js";
 
 const router = Router();
@@ -14,6 +14,9 @@ router.post("/", verificarPermiso("ventas", "crear"), crearVenta);
 
 // Endpoint para listar el historial de ventas
 router.get("/", verificarPermiso("ventas", "ver"), listarVentas);
+
+// Endpoint para exportar todas las ventas filtradas sin depender del paginador
+router.get("/exportar", verificarPermiso("ventas", "exportar"), exportarVentas);
 
 // Endpoint para obtener detalle de una venta específica
 router.get("/:id", verificarPermiso("ventas", "ver"), obtenerVenta);

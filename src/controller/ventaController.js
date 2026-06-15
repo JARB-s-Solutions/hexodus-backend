@@ -1,8 +1,127 @@
 import prisma from "../config/prisma.js";
 import crypto from "crypto";
-import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr } from "../utils/timezone.js";
+import ExcelJS from "exceljs";
+import PDFDocument from "pdfkit";
+import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr, horaStringMerida } from "../utils/timezone.js";
 import { registrarLog } from "../services/auditoriaService.js";
 
+const formatoMoneda = (value) => Number(value || 0);
+
+const formatoFechaHoraLocal = (date) => `${fechaUTCADiaStr(date)} ${horaStringMerida(date).slice(0, 5)}`;
+
+const csvCell = (value) => {
+    const raw = value === null || value === undefined ? "" : String(value);
+    return `"${raw.replace(/"/g, '""')}"`;
+};
+
+const aplicarEstiloHeader = (row) => {
+    row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+    row.alignment = { vertical: "middle", horizontal: "center" };
+    row.eachCell((cell) => {
+        cell.border = {
+            top: { style: "thin", color: { argb: "FFE5E7EB" } },
+            bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+        };
+    });
+};
+
+const ajustarColumnas = (worksheet) => {
+    worksheet.columns.forEach((column) => {
+        let maxLength = 12;
+        column.eachCell({ includeEmpty: true }, (cell) => {
+            const value = cell.value;
+            const text = value === null || value === undefined ? "" : String(value);
+            maxLength = Math.max(maxLength, text.length + 2);
+        });
+        column.width = Math.min(maxLength, 42);
+    });
+};
+
+function construirFiltrosVentas(query) {
+    const { search, periodo, fecha_inicio, fecha_fin, metodo_pago } = query;
+    const whereClause = { isDeleted: false };
+
+    if (metodo_pago && !["todos", "Todos", "Todos los Metodos", "Todos los Métodos"].includes(metodo_pago)) {
+        whereClause.pagos = {
+            some: {
+                metodoPago: { nombre: { equals: metodo_pago, mode: "insensitive" } }
+            }
+        };
+    }
+
+    if (search) {
+        const orConditions = [
+            { socio: { nombreCompleto: { contains: search, mode: "insensitive" } } },
+            { detalles: { some: { nombreProducto: { contains: search, mode: "insensitive" } } } }
+        ];
+
+        const numSearch = parseInt(String(search).replace(/\D/g, ""));
+        if (!isNaN(numSearch)) {
+            orConditions.push({ id: numSearch });
+        }
+
+        whereClause.OR = orConditions;
+    }
+
+    const { year: _y, month: _m, day: _d } = ahoraEnMerida();
+    let gteDate = null;
+    let lteDate = null;
+
+    if (periodo && !["Todo", "Todos", "todo"].includes(periodo)) {
+        gteDate = localAUTC(_y, _m, _d, 0, 0, 0, 0);
+        lteDate = localAUTC(_y, _m, _d, 23, 59, 59, 999);
+
+        switch (periodo) {
+            case "Ayer":
+                gteDate = localAUTC(_y, _m, _d - 1, 0, 0, 0, 0);
+                lteDate = localAUTC(_y, _m, _d - 1, 23, 59, 59, 999);
+                break;
+            case "Esta Semana": {
+                const dowISO = new Date(Date.UTC(_y, _m - 1, _d)).getUTCDay() || 7;
+                gteDate = localAUTC(_y, _m, _d - dowISO + 1, 0, 0, 0, 0);
+                break;
+            }
+            case "Este Mes":
+                gteDate = localAUTC(_y, _m, 1, 0, 0, 0, 0);
+                break;
+            case "Este Trimestre":
+                gteDate = localAUTC(_y, Math.floor((_m - 1) / 3) * 3 + 1, 1, 0, 0, 0, 0);
+                break;
+            case "Este Semestre":
+                gteDate = localAUTC(_y, _m <= 6 ? 1 : 7, 1, 0, 0, 0, 0);
+                break;
+            case "Este Año":
+                gteDate = localAUTC(_y, 1, 1, 0, 0, 0, 0);
+                break;
+            case "Personalizado":
+                gteDate = fecha_inicio ? fechaStrAInicio(fecha_inicio) : null;
+                lteDate = fecha_fin ? fechaStrAFin(fecha_fin) : null;
+                break;
+        }
+
+        if (gteDate || lteDate) {
+            whereClause.fechaVenta = {};
+            if (gteDate) whereClause.fechaVenta.gte = gteDate;
+            if (lteDate) whereClause.fechaVenta.lte = lteDate;
+        }
+    }
+
+    return { whereClause, gteDate, lteDate };
+}
+
+function obtenerResumenProductos(venta) {
+    if (!venta.detalles || venta.detalles.length === 0) return "Sin productos";
+    const primer = venta.detalles[0].nombreProducto;
+    const extras = venta.detalles.length - 1;
+    return extras > 0 ? `${primer} +${extras} mas` : primer;
+}
+
+function obtenerMetodoPago(venta) {
+    return venta.pagos?.length > 0
+        ? venta.pagos.map((p) => p.metodoPago?.nombre || "No registrado").join(" + ")
+        : "No registrado";
+}
 
 // REGISTRAR NUEVA VENTA (Punto de Venta) 
 export const crearVenta = async (req, res) => {
@@ -164,78 +283,9 @@ export const listarVentas = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        const { search, periodo, fecha_inicio, fecha_fin, metodo_pago } = req.query;
-
-        // LÓGICA DE FILTROS
-        let whereClause = { isDeleted: false };
-
-        // Filtro por Método de Pago
-        if (metodo_pago && metodo_pago !== 'Todos los Metodos') {
-            whereClause.pagos = {
-                some: {
-                    metodoPago: { nombre: { equals: metodo_pago, mode: 'insensitive' } }
-                }
-            };
-        }
-
-        // Filtro por Búsqueda (ID, Cliente o Producto)
-        if (search) {
-            let orConditions = [
-                { socio: { nombreCompleto: { contains: search, mode: 'insensitive' } } },
-                { detalles: { some: { nombreProducto: { contains: search, mode: 'insensitive' } } } }
-            ];
-
-            const numSearch = parseInt(search.replace(/\D/g, ''));
-            if (!isNaN(numSearch)) {
-                orConditions.push({ id: numSearch });
-            }
-
-            whereClause.OR = orConditions;
-        }
-
-        // Filtro por Periodo de Tiempo
         const { year: _y, month: _m, day: _d } = ahoraEnMerida();
-        let gteDate = null;
-        let lteDate = null;
-
-        if (periodo && periodo !== 'Todos') {
-            gteDate = localAUTC(_y, _m, _d, 0, 0, 0, 0);
-            lteDate = localAUTC(_y, _m, _d, 23, 59, 59, 999);
-
-            switch (periodo) {
-                case 'Ayer':
-                    gteDate = localAUTC(_y, _m, _d - 1, 0, 0, 0, 0);
-                    lteDate = localAUTC(_y, _m, _d - 1, 23, 59, 59, 999);
-                    break;
-                case 'Esta Semana': {
-                    const dowISO = new Date(Date.UTC(_y, _m - 1, _d)).getUTCDay() || 7;
-                    gteDate = localAUTC(_y, _m, _d - dowISO + 1, 0, 0, 0, 0);
-                    break;
-                }
-                case 'Este Mes':
-                    gteDate = localAUTC(_y, _m, 1, 0, 0, 0, 0);
-                    break;
-                case 'Este Trimestre':
-                    gteDate = localAUTC(_y, Math.floor((_m - 1) / 3) * 3 + 1, 1, 0, 0, 0, 0);
-                    break;
-                case 'Este Semestre':
-                    gteDate = localAUTC(_y, _m <= 6 ? 1 : 7, 1, 0, 0, 0, 0);
-                    break;
-                case 'Este Año':
-                    gteDate = localAUTC(_y, 1, 1, 0, 0, 0, 0);
-                    break;
-                case 'Personalizado':
-                    if (fecha_inicio) gteDate = fechaStrAInicio(fecha_inicio);
-                    if (fecha_fin) lteDate = fechaStrAFin(fecha_fin);
-                    break;
-            }
-
-            if (gteDate || lteDate) {
-                whereClause.fechaVenta = {};
-                if (gteDate) whereClause.fechaVenta.gte = gteDate;
-                if (lteDate) whereClause.fechaVenta.lte = lteDate;
-            }
-        }
+        const { periodo } = req.query;
+        const { whereClause, gteDate, lteDate } = construirFiltrosVentas(req.query);
 
         // EJECUCIÓN PARALELA
         const mesInicio = localAUTC(_y, _m, 1, 0, 0, 0, 0);
@@ -311,22 +361,14 @@ export const listarVentas = async (req, res) => {
         };
 
         const dataFormateada = ventasPaginadas.map(venta => {
-            let resumenProductos = 'Sin productos';
-            if (venta.detalles.length > 0) {
-                const primer = venta.detalles[0].nombreProducto;
-                const extras = venta.detalles.length - 1;
-                resumenProductos = extras > 0 ? `${primer} +${extras} mas` : primer;
-            }
-
             return {
                 id: venta.id,
                 id_venta: `V-${venta.id.toString().padStart(4, '0')}`,
                 cliente: venta.socio ? venta.socio.nombreCompleto : 'Público General',
-                productos_resumen: resumenProductos,
+                productos_resumen: obtenerResumenProductos(venta),
                 total: parseFloat(venta.total),
                 fecha_hora: venta.fechaVenta,
-                // Unir los nombres de los métodos
-                metodo_pago: venta.pagos.length > 0 ? venta.pagos.map(p => p.metodoPago.nombre).join(' + ') : 'No registrado',
+                metodo_pago: obtenerMetodoPago(venta),
                 status: venta.status
             };
         });
@@ -342,6 +384,274 @@ export const listarVentas = async (req, res) => {
     } catch (error) {
         console.error("Error al listar historial:", error);
         res.status(500).json({ error: "Error interno al obtener el historial." });
+    }
+};
+
+// EXPORTAR VENTAS COMPLETAS (usa los mismos filtros del historial, sin paginación)
+export const exportarVentas = async (req, res) => {
+    try {
+        const formato = String(req.query.formato || "XLSX").toUpperCase();
+
+        if (req.query.periodo === "Personalizado" && (!req.query.fecha_inicio || !req.query.fecha_fin)) {
+            return res.status(400).json({ error: "Selecciona fecha inicio y fecha fin para exportar ventas personalizadas." });
+        }
+
+        const { whereClause, gteDate, lteDate } = construirFiltrosVentas(req.query);
+
+        const ventas = await prisma.venta.findMany({
+            where: whereClause,
+            orderBy: { fechaVenta: "desc" },
+            include: {
+                socio: { select: { nombreCompleto: true, codigoSocio: true } },
+                cajero: { select: { nombreCompleto: true } },
+                detalles: {
+                    include: {
+                        producto: {
+                            select: {
+                                codigo: true,
+                                nombre: true,
+                                categoria: { select: { nombre: true } }
+                            }
+                        }
+                    }
+                },
+                pagos: { include: { metodoPago: true } }
+            }
+        });
+
+        const ventasExitosas = ventas.filter((venta) => venta.status === "exitosa");
+        const totalVendido = ventasExitosas.reduce((acc, venta) => acc + formatoMoneda(venta.total), 0);
+        const totalCancelado = ventas
+            .filter((venta) => venta.status === "cancelada")
+            .reduce((acc, venta) => acc + formatoMoneda(venta.total), 0);
+        const piezasVendidas = ventasExitosas.reduce(
+            (acc, venta) => acc + venta.detalles.reduce((sum, detalle) => sum + detalle.cantidad, 0),
+            0
+        );
+
+        const rango = gteDate && lteDate
+            ? `${fechaUTCADiaStr(gteDate)} a ${fechaUTCADiaStr(lteDate)}`
+            : "Todo el histórico";
+        const fechaArchivo = fechaUTCADiaStr(new Date());
+
+        const metodosMap = new Map();
+        const productosMap = new Map();
+        const detalleRows = [];
+        const ventasRows = ventas.map((venta) => {
+            const cajero = venta.cajero?.nombreCompleto || "No registrado";
+            const cliente = venta.socio
+                ? `${venta.socio.nombreCompleto}${venta.socio.codigoSocio ? ` (${venta.socio.codigoSocio})` : ""}`
+                : "Público General";
+            const metodoPago = obtenerMetodoPago(venta);
+
+            venta.pagos.forEach((pago) => {
+                const metodo = pago.metodoPago?.nombre || "No registrado";
+                const item = metodosMap.get(metodo) || { metodo, transacciones: 0, total: 0 };
+                item.transacciones += 1;
+                item.total += formatoMoneda(pago.monto);
+                metodosMap.set(metodo, item);
+            });
+
+            venta.detalles.forEach((detalle) => {
+                const categoria = detalle.producto?.categoria?.nombre || "Sin categoría";
+                const codigo = detalle.codigoProducto || detalle.producto?.codigo || "";
+                const producto = detalle.nombreProducto || detalle.producto?.nombre || "Producto";
+                const productKey = `${codigo}-${producto}-${categoria}`;
+                const productItem = productosMap.get(productKey) || {
+                    codigo,
+                    producto,
+                    categoria,
+                    unidades: 0,
+                    ingresos: 0,
+                    ganancia: 0,
+                };
+                productItem.unidades += detalle.cantidad;
+                productItem.ingresos += formatoMoneda(detalle.subtotalLinea);
+                productItem.ganancia += formatoMoneda(detalle.gananciaLinea);
+                productosMap.set(productKey, productItem);
+
+                detalleRows.push({
+                    folio: `V-${venta.id.toString().padStart(4, "0")}`,
+                    fecha: formatoFechaHoraLocal(venta.fechaVenta),
+                    cliente,
+                    cajero,
+                    estado: venta.status,
+                    codigo,
+                    producto,
+                    categoria,
+                    cantidad: detalle.cantidad,
+                    precioUnitario: formatoMoneda(detalle.precioUnitario),
+                    subtotal: formatoMoneda(detalle.subtotalLinea),
+                    ganancia: formatoMoneda(detalle.gananciaLinea),
+                    metodoPago,
+                });
+            });
+
+            return {
+                folio: `V-${venta.id.toString().padStart(4, "0")}`,
+                fecha: formatoFechaHoraLocal(venta.fechaVenta),
+                cliente,
+                cajero,
+                estado: venta.status,
+                productos: obtenerResumenProductos(venta),
+                articulos: venta.detalles.reduce((acc, detalle) => acc + detalle.cantidad, 0),
+                subtotal: formatoMoneda(venta.subtotal),
+                descuento: formatoMoneda(venta.descuento),
+                total: formatoMoneda(venta.total),
+                metodoPago,
+            };
+        });
+
+        const productosRows = Array.from(productosMap.values()).sort((a, b) => b.unidades - a.unidades);
+        const metodosRows = Array.from(metodosMap.values()).sort((a, b) => b.total - a.total);
+
+        if (formato === "CSV") {
+            const headers = [
+                "Folio", "Fecha", "Cliente", "Cajero", "Estado", "Código", "Producto",
+                "Categoría", "Cantidad", "Precio Unitario", "Subtotal", "Ganancia", "Método Pago"
+            ];
+            const csvContent = [
+                headers.map(csvCell).join(","),
+                ...detalleRows.map((row) => [
+                    row.folio, row.fecha, row.cliente, row.cajero, row.estado, row.codigo, row.producto,
+                    row.categoria, row.cantidad, row.precioUnitario, row.subtotal, row.ganancia, row.metodoPago
+                ].map(csvCell).join(","))
+            ].join("\n");
+
+            const buffer = Buffer.from(`\uFEFF${csvContent}`, "utf8");
+            res.setHeader("Content-Type", "text/csv; charset=utf-8");
+            res.setHeader("Content-Disposition", `attachment; filename="ventas_${fechaArchivo}.csv"`);
+            res.setHeader("Content-Length", buffer.length);
+            return res.status(200).send(buffer);
+        }
+
+        if (formato === "PDF") {
+            const buffer = await new Promise((resolve, reject) => {
+                const doc = new PDFDocument({ size: "LETTER", layout: "landscape", margin: 36 });
+                const chunks = [];
+                doc.on("data", (chunk) => chunks.push(chunk));
+                doc.on("end", () => resolve(Buffer.concat(chunks)));
+                doc.on("error", reject);
+
+                doc.fontSize(16).text("Reporte de Ventas", { align: "left" });
+                doc.moveDown(0.3);
+                doc.fontSize(9).fillColor("#555555").text(`Periodo: ${rango} | Generado: ${formatoFechaHoraLocal(new Date())}`);
+                doc.moveDown();
+                doc.fillColor("#000000").fontSize(10);
+                doc.text(`Ventas exportadas: ${ventas.length}`);
+                doc.text(`Ventas exitosas: ${ventasExitosas.length}`);
+                doc.text(`Total vendido: $${totalVendido.toFixed(2)}`);
+                doc.text(`Productos vendidos: ${piezasVendidas}`);
+                doc.moveDown();
+
+                doc.fontSize(11).text("Historial de ventas", { underline: true });
+                doc.moveDown(0.4);
+                ventasRows.forEach((venta) => {
+                    if (doc.y > 560) {
+                        doc.addPage();
+                    }
+                    doc.fontSize(8).text(
+                        `${venta.folio} | ${venta.fecha} | ${venta.cliente} | ${venta.productos} | $${venta.total.toFixed(2)} | ${venta.metodoPago} | ${venta.estado}`,
+                        { width: 720 }
+                    );
+                });
+
+                doc.end();
+            });
+
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename="ventas_${fechaArchivo}.pdf"`);
+            res.setHeader("Content-Length", buffer.length);
+            return res.status(200).send(buffer);
+        }
+
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = "Hexodus";
+        workbook.created = new Date();
+
+        const resumenSheet = workbook.addWorksheet("Resumen");
+        resumenSheet.addRow(["Reporte", "Ventas"]);
+        resumenSheet.addRow(["Periodo", rango]);
+        resumenSheet.addRow(["Generado", formatoFechaHoraLocal(new Date())]);
+        resumenSheet.addRow(["Búsqueda", req.query.search || "Sin búsqueda"]);
+        resumenSheet.addRow(["Método de pago", req.query.metodo_pago || "Todos"]);
+        resumenSheet.addRow([]);
+        aplicarEstiloHeader(resumenSheet.addRow(["Indicador", "Valor"]));
+        [
+            ["Ventas exportadas", ventas.length],
+            ["Ventas exitosas", ventasExitosas.length],
+            ["Ventas canceladas", ventas.length - ventasExitosas.length],
+            ["Total vendido", totalVendido],
+            ["Total cancelado", totalCancelado],
+            ["Productos vendidos", piezasVendidas],
+        ].forEach(([label, value]) => {
+            const row = resumenSheet.addRow([label, value]);
+            if (String(label).includes("Total")) row.getCell(2).numFmt = '"$"#,##0.00';
+        });
+        ajustarColumnas(resumenSheet);
+
+        const historialSheet = workbook.addWorksheet("Historial");
+        aplicarEstiloHeader(historialSheet.addRow([
+            "Folio", "Fecha / Hora", "Cliente", "Cajero", "Estado", "Productos", "Artículos",
+            "Subtotal", "Descuento", "Total", "Método Pago"
+        ]));
+        ventasRows.forEach((venta) => {
+            const row = historialSheet.addRow([
+                venta.folio, venta.fecha, venta.cliente, venta.cajero, venta.estado, venta.productos,
+                venta.articulos, venta.subtotal, venta.descuento, venta.total, venta.metodoPago
+            ]);
+            [8, 9, 10].forEach((cellIndex) => row.getCell(cellIndex).numFmt = '"$"#,##0.00');
+        });
+        historialSheet.views = [{ state: "frozen", ySplit: 1 }];
+        historialSheet.autoFilter = "A1:K1";
+        ajustarColumnas(historialSheet);
+
+        const detalleSheet = workbook.addWorksheet("Detalle Productos");
+        aplicarEstiloHeader(detalleSheet.addRow([
+            "Folio", "Fecha", "Cliente", "Cajero", "Estado", "Código", "Producto", "Categoría",
+            "Cantidad", "Precio Unitario", "Subtotal", "Ganancia", "Método Pago"
+        ]));
+        detalleRows.forEach((detalle) => {
+            const row = detalleSheet.addRow([
+                detalle.folio, detalle.fecha, detalle.cliente, detalle.cajero, detalle.estado,
+                detalle.codigo, detalle.producto, detalle.categoria, detalle.cantidad,
+                detalle.precioUnitario, detalle.subtotal, detalle.ganancia, detalle.metodoPago
+            ]);
+            [10, 11, 12].forEach((cellIndex) => row.getCell(cellIndex).numFmt = '"$"#,##0.00');
+        });
+        detalleSheet.views = [{ state: "frozen", ySplit: 1 }];
+        detalleSheet.autoFilter = "A1:M1";
+        ajustarColumnas(detalleSheet);
+
+        const productosSheet = workbook.addWorksheet("Productos Vendidos");
+        aplicarEstiloHeader(productosSheet.addRow(["Código", "Producto", "Categoría", "Unidades", "Ingresos", "Ganancia Estimada"]));
+        productosRows.forEach((producto) => {
+            const row = productosSheet.addRow([
+                producto.codigo, producto.producto, producto.categoria, producto.unidades, producto.ingresos, producto.ganancia
+            ]);
+            [5, 6].forEach((cellIndex) => row.getCell(cellIndex).numFmt = '"$"#,##0.00');
+        });
+        productosSheet.views = [{ state: "frozen", ySplit: 1 }];
+        productosSheet.autoFilter = "A1:F1";
+        ajustarColumnas(productosSheet);
+
+        const metodosSheet = workbook.addWorksheet("Métodos de Pago");
+        aplicarEstiloHeader(metodosSheet.addRow(["Método", "Transacciones", "Total"]));
+        metodosRows.forEach((metodo) => {
+            const row = metodosSheet.addRow([metodo.metodo, metodo.transacciones, metodo.total]);
+            row.getCell(3).numFmt = '"$"#,##0.00';
+        });
+        metodosSheet.views = [{ state: "frozen", ySplit: 1 }];
+        ajustarColumnas(metodosSheet);
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="ventas_${fechaArchivo}.xlsx"`);
+        res.setHeader("Content-Length", buffer.length);
+        return res.status(200).send(Buffer.from(buffer));
+    } catch (error) {
+        console.error("Error al exportar ventas:", error);
+        return res.status(500).json({ error: "Error interno al exportar ventas." });
     }
 };
 
