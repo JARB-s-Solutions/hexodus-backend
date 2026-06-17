@@ -111,6 +111,8 @@ export const validarAsistenciaFacial = async (req, res) => {
                     id: bestMatch.id,
                     codigo_socio: bestMatch.codigoSocio,
                     nombre_completo: bestMatch.nombreCompleto,
+                    // Se agrega la foto de perfil si está disponible, de lo contrario se devuelve null
+                    foto_perfil_url: bestMatch.fotoUrl || null,
                     membresia: membresiaActual ? membresiaActual.plan.nombre : 'Sin plan',
                     fecha_fin_membresia: membresiaActual ? fechaUTCADiaStr(membresiaActual.fechaFin) : null,
                     estado_pago: membresiaActual ? membresiaActual.estadoPago : 'N/A'
