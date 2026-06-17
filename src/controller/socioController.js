@@ -672,6 +672,13 @@ export const listarSocios = async (req, res) => {
         membresia: membresiaActual
           ? membresiaActual.plan.nombre
           : "Sin membresía",
+        plan_id: membresiaActual ? membresiaActual.planId : null,
+        precio_membresia: membresiaActual ? membresiaActual.precioCongelado : null,
+        precio_congelado: membresiaActual ? membresiaActual.precioCongelado : null,
+        monto_pendiente:
+          membresiaActual && membresiaActual.estadoPago === "sin_pagar"
+            ? membresiaActual.precioCongelado
+            : 0,
         vencimiento: membresiaActual
           ? formatoLocalISO(membresiaActual.fechaFin)
           : null,
@@ -962,6 +969,13 @@ export const obtenerSocio = async (req, res) => {
       membresia: membresiaActual
         ? membresiaActual.plan.nombre
         : "Sin membresía",
+      plan_id: membresiaActual ? membresiaActual.planId : null,
+      precio_membresia: membresiaActual ? membresiaActual.precioCongelado : null,
+      precio_congelado: membresiaActual ? membresiaActual.precioCongelado : null,
+      monto_pendiente:
+        membresiaActual && membresiaActual.estadoPago === "sin_pagar"
+          ? membresiaActual.precioCongelado
+          : 0,
       vigencia_membresia: membresiaActual
         ? new Date(membresiaActual.fechaFin) >= hoy
           ? "Vigente"
