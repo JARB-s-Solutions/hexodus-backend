@@ -2,6 +2,23 @@ import prisma from "../config/prisma.js";
 import { registrarLog } from "../services/auditoriaService.js";
 import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, partesEnMerida } from "../utils/timezone.js";
 
+function formatearProductosVenta(detalles = []) {
+    if (!detalles.length) return "Sin productos";
+
+    const resumen = detalles
+        .map((detalle) => `${detalle.nombreProducto} x${detalle.cantidad}`)
+        .join(', ');
+
+    return resumen.length > 180 ? `${resumen.slice(0, 177)}...` : resumen;
+}
+
+function formatearNotaVenta(movimiento, venta) {
+    if (!venta) return null;
+
+    const prefijo = movimiento.tipo === 'gasto' ? 'Cancelación Venta' : 'Venta';
+    return `${prefijo} #${venta.id} - Productos: ${formatearProductosVenta(venta.detalles)}`;
+}
+
 // REGISTRAR MOVIMIENTO MANUAL (Ingreso / Egreso)
 export const registrarMovimiento = async (req, res) => {
     try {
@@ -118,9 +135,29 @@ export const listarMovimientos = async (req, res) => {
                 { usuario: { nombreCompleto: { contains: search, mode: 'insensitive' } } },
                 { nota: { contains: search, mode: 'insensitive' } }
             ];
+
+            const ventasCoincidentes = await prisma.venta.findMany({
+                where: {
+                    isDeleted: false,
+                    OR: [
+                        { detalles: { some: { nombreProducto: { contains: search, mode: 'insensitive' } } } },
+                        { socio: { nombreCompleto: { contains: search, mode: 'insensitive' } } }
+                    ]
+                },
+                select: { id: true },
+                take: 200
+            });
+
+            if (ventasCoincidentes.length > 0) {
+                orConditions.push({
+                    referenciaTipo: 'venta',
+                    referenciaId: { in: ventasCoincidentes.map((venta) => venta.id) }
+                });
+            }
             
             if (!isNaN(searchId)) {
                 orConditions.push({ id: searchId });
+                orConditions.push({ referenciaTipo: 'venta', referenciaId: searchId });
             }
             andConditions.push({ OR: orConditions });
         }
@@ -204,6 +241,32 @@ export const listarMovimientos = async (req, res) => {
             prisma.metodoPago.findMany()
         ]);
 
+        const ventaIds = [
+            ...new Set(
+                movimientosRaw
+                    .filter((mov) => mov.referenciaTipo === 'venta' && mov.referenciaId)
+                    .map((mov) => mov.referenciaId)
+            )
+        ];
+
+        const ventasPorId = new Map();
+        if (ventaIds.length > 0) {
+            const ventasRelacionadas = await prisma.venta.findMany({
+                where: { id: { in: ventaIds } },
+                select: {
+                    id: true,
+                    detalles: {
+                        select: {
+                            nombreProducto: true,
+                            cantidad: true
+                        }
+                    }
+                }
+            });
+
+            ventasRelacionadas.forEach((venta) => ventasPorId.set(venta.id, venta));
+        }
+
         // Calcular los KPIs para las 4 tarjetas superiores
         const totalIngresos = sumaIngresos._sum.monto ? parseFloat(sumaIngresos._sum.monto) : 0;
         const totalEgresos = sumaEgresos._sum.monto ? parseFloat(sumaEgresos._sum.monto) : 0;
@@ -239,6 +302,13 @@ export const listarMovimientos = async (req, res) => {
                 }
             }
 
+            if (mov.referenciaTipo === 'venta' && mov.referenciaId) {
+                const notaVenta = formatearNotaVenta(mov, ventasPorId.get(mov.referenciaId));
+                if (notaVenta) {
+                    notaLimpia = notaVenta;
+                }
+            }
+
             const p = partesEnMerida(mov.fecha);
             const fechaLocalExacta = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}T${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}:${String(p.second).padStart(2, '0')}`;
 
@@ -251,7 +321,9 @@ export const listarMovimientos = async (req, res) => {
                 nota_movimiento: notaLimpia || mov.concepto.nombre,
                 monto: parseFloat(mov.monto),
                 metodo: metodoPagoStr,
-                responsable: mov.usuario.nombreCompleto
+                responsable: mov.usuario.nombreCompleto,
+                referencia_id: mov.referenciaId,
+                referencia_tipo: mov.referenciaTipo
             };
         });
 
