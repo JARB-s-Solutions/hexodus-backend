@@ -117,6 +117,14 @@ function obtenerResumenProductos(venta) {
     return extras > 0 ? `${primer} +${extras} mas` : primer;
 }
 
+function obtenerDetalleProductosNota(detalles) {
+    const resumen = detalles
+        .map((detalle) => `${detalle.nombreProducto} x${detalle.cantidad}`)
+        .join(', ');
+
+    return resumen.length > 180 ? `${resumen.slice(0, 177)}...` : resumen;
+}
+
 function obtenerMetodoPago(venta) {
     return venta.pagos?.length > 0
         ? venta.pagos.map((p) => p.metodoPago?.nombre || "No registrado").join(" + ")
@@ -210,6 +218,8 @@ export const crearVenta = async (req, res) => {
             return res.status(400).json({ error: `El total de los pagos ($${totalPagado}) no coincide con el total de la venta ($${totalVenta}).` });
         }
 
+        const productosNota = obtenerDetalleProductosNota(detallesVenta);
+
         // Transacción Maestra
         const resultado = await prisma.$transaction(async (tx) => {
             const nuevaVenta = await tx.venta.create({
@@ -258,7 +268,7 @@ export const crearVenta = async (req, res) => {
                         monto: montoPago, 
                         referenciaTipo: 'venta', 
                         referenciaId: nuevaVenta.id,
-                        nota: `[Pago: ID ${pago.metodo_pago_id}] Parcialidad Venta #${nuevaVenta.id}`
+                        nota: `[Pago: ID ${pago.metodo_pago_id}] Venta #${nuevaVenta.id} - Productos: ${productosNota}`
                     }
                 });
             }
