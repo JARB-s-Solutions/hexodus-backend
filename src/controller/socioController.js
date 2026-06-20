@@ -8,6 +8,7 @@ import {
   localAUTC,
   partesEnMerida,
 } from "../utils/timezone.js";
+import { inicioDiaMembresia } from "../utils/membresiaVigencia.js";
 
 // AYUDANTES DE VALIDACIÓN GLOBALES
 const validarFecha = (fechaStr, nombreCampo) => {
@@ -231,14 +232,14 @@ const validarMetodoPago = async (tx, metodoId) => {
 };
 
 const recalcularStatusSocio = async (tx, socioId) => {
-  const hoy = new Date();
+  const inicioHoy = inicioDiaMembresia();
 
   const membresiaVigentePagada = await tx.membresiaSocio.findFirst({
     where: {
       socioId,
       status: "activa",
       estadoPago: "pagado",
-      fechaFin: { gte: hoy },
+      fechaFin: { gte: inicioHoy },
     },
     select: { id: true },
   });
@@ -1134,8 +1135,7 @@ export const actualizarSocio = async (req, res) => {
 
           // 🛡️ ESCUDO ANTI-FUGAS DE DINERO (BLINDADO POR FECHA) 🛡️
           if (membresiaActual) {
-            const { year, month, day } = ahoraEnMerida();
-            const hoy = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+            const hoy = inicioDiaMembresia();
             const estaVencidaPorFecha =
               new Date(membresiaActual.fechaFin) < hoy;
 

@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { ahoraEnMerida, localAUTC, fechaStrAInicio, fechaStrAFin, fechaUTCADiaStr, fechaUTCAMesStr } from "../utils/timezone.js";
+import { inicioDiaMembresia } from "../utils/membresiaVigencia.js";
 
 const mapaPeriodos = {
     'dia': 'Hoy',
@@ -127,7 +128,13 @@ export const obtenerResumenFinanciero = async (req, res) => {
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', referenciaTipo: 'membresia', fecha: { gte: gteAnterior, lte: lteAnterior } }, _sum: { monto: true } }),
             prisma.cajaMovimiento.aggregate({ where: { tipo: 'ingreso', referenciaTipo: 'venta', fecha: { gte: gteAnterior, lte: lteAnterior } }, _sum: { monto: true } }),
 
-            prisma.membresiaSocio.count({ where: { status: 'activa', fechaFin: { gte: new Date() } } }),
+            prisma.membresiaSocio.count({
+                where: {
+                    status: 'activa',
+                    estadoPago: 'pagado',
+                    fechaFin: { gte: inicioDiaMembresia() }
+                }
+            }),
             prisma.cajaMovimiento.count({ where: { tipo: 'ingreso', referenciaTipo: 'venta', fecha: { gte: gteActual, lte: lteActual } } }),
             prisma.cajaMovimiento.count({ where: { tipo: 'gasto', fecha: { gte: gteActual, lte: lteActual } } }),
 
