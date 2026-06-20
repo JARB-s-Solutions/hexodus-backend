@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { fechaUTCADiaStr } from "../utils/timezone.js";
+import { inicioDiaMembresia } from "../utils/membresiaVigencia.js";
 
 export const ejecutarMantenimientoDiario = async (req, res) => {
     try {
@@ -17,16 +18,21 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
         }
 
         const hoy = new Date();
+        const inicioHoy = inicioDiaMembresia(hoy);
 
         // TAREA 1: LIMPIEZA DE BASE DE DATOS
-        const [ofertasLimpias, membresiasVencidas] = await Promise.all([
+        const [ofertasLimpias, membresiasVencidas, membresiasReactivadas] = await Promise.all([
             prisma.membresiaPlan.updateMany({
                 where: { esOferta: true, fechaFinOferta: { lt: hoy } },
                 data: { esOferta: false, precioOferta: null, fechaFinOferta: null }
             }),
             prisma.membresiaSocio.updateMany({
-                where: { status: 'activa', fechaFin: { lt: hoy } },
+                where: { status: 'activa', fechaFin: { lt: inicioHoy } },
                 data: { status: 'vencida' }
+            }),
+            prisma.membresiaSocio.updateMany({
+                where: { status: 'vencida', fechaFin: { gte: inicioHoy } },
+                data: { status: 'activa' }
             })
         ]);
 
@@ -39,7 +45,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
                     some: {
                         status: 'activa',
                         estadoPago: 'pagado',
-                        fechaFin: { gte: hoy }
+                        fechaFin: { gte: inicioHoy }
                     }
                 }
             },
@@ -55,7 +61,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
                     none: {
                         status: 'activa',
                         estadoPago: 'pagado',
-                        fechaFin: { gte: hoy }
+                        fechaFin: { gte: inicioHoy }
                     }
                 }
             },
@@ -108,7 +114,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
             limiteVencimiento.setDate(limiteVencimiento.getDate() + config.alertaVencimientosDias);
 
             const membresiasPorVencer = await prisma.membresiaSocio.findMany({
-                where: { status: 'activa', fechaFin: { lte: limiteVencimiento, gte: hoy } },
+                where: { status: 'activa', fechaFin: { lte: limiteVencimiento, gte: inicioHoy } },
                 include: { socio: true, plan: true }
             });
 
@@ -200,6 +206,7 @@ export const ejecutarMantenimientoDiario = async (req, res) => {
             reporte: {
                 ofertas_desactivadas: ofertasLimpias.count,
                 membresias_vencidas: membresiasVencidas.count,
+                membresias_reactivadas_por_fecha_vigente: membresiasReactivadas.count,
                 socios_reactivados_por_membresia_vigente: sociosReactivados.count,
                 socios_inactivados_por_vencimiento: sociosVencidos.count,
                 nuevas_alertas_generadas: nuevasAlertas,

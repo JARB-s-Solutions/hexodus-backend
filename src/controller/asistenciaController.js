@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida, fechaUTCADiaStr } from "../utils/timezone.js";
+import { evaluarAccesoSocio } from "../utils/membresiaVigencia.js";
 
 const calcularDistancia = (desc1, desc2) => {
     if (!desc1 || !desc2 || desc1.length !== desc2.length) return 1.0; 
@@ -8,6 +9,32 @@ const calcularDistancia = (desc1, desc2) => {
         sum += Math.pow(desc1[i] - desc2[i], 2);
     }
     return Math.sqrt(sum);
+};
+
+const sincronizarEstadosVigentes = async (socio, membresia) => {
+    const actualizaciones = [];
+
+    if (socio.status !== "activo") {
+        actualizaciones.push(
+            prisma.socio.update({
+                where: { id: socio.id },
+                data: { status: "activo" }
+            })
+        );
+    }
+
+    if (membresia?.status !== "activa") {
+        actualizaciones.push(
+            prisma.membresiaSocio.update({
+                where: { id: membresia.id },
+                data: { status: "activa" }
+            })
+        );
+    }
+
+    if (actualizaciones.length > 0) {
+        await Promise.all(actualizaciones);
+    }
 };
 
 // VALIDAR ASISTENCIA FACIAL (Kiosco principal)
@@ -20,12 +47,16 @@ export const validarAsistenciaFacial = async (req, res) => {
             return res.status(400).json({ success: false, message: "Descriptor facial inválido." });
         }
 
-        const sociosActivos = await prisma.socio.findMany({
-            where: { status: 'activo', isDeleted: false, faceEncoding: { not: null } },
+        const sociosConRostro = await prisma.socio.findMany({
+            where: {
+                status: { not: "bloqueado" },
+                isDeleted: false,
+                faceEncoding: { not: null }
+            },
             include: {
                 membresias: { 
-                    where: { status: 'activa' }, 
-                    orderBy: { id: 'desc' }, 
+                    where: { status: { not: 'cancelada' } },
+                    orderBy: { fechaFin: 'desc' },
                     take: 1, 
                     include: { plan: true } 
                 }
@@ -35,7 +66,7 @@ export const validarAsistenciaFacial = async (req, res) => {
         let bestMatch = null;
         let bestDistance = 1.0; 
 
-        for (const socio of sociosActivos) {
+        for (const socio of sociosConRostro) {
             const dbDescriptor = typeof socio.faceEncoding === 'string' ? JSON.parse(socio.faceEncoding) : socio.faceEncoding;
             const distance = calcularDistancia(faceDescriptor, dbDescriptor);
             if (distance < bestDistance) {
@@ -67,21 +98,17 @@ export const validarAsistenciaFacial = async (req, res) => {
 
         // CASO 2: SOCIO RECONOCIDO - VALIDAMOS REGLAS DE NEGOCIO
         const membresiaActual = bestMatch.membresias[0];
-        const hoy = new Date();
         const nivelConfianza = Math.max(0, (1 - bestDistance) * 100); 
+        const evaluacionMembresia = evaluarAccesoSocio(bestMatch, membresiaActual);
 
-        let decision = "permitido";
-        let motivo_codigo = "ok";
-        let motivo_texto = "Membresía vigente";
-        let estado_acceso = "permitido";
-        let tipoAcceso = tipo; 
+        const decision = evaluacionMembresia.permitido ? "permitido" : "denegado";
+        const motivo_codigo = evaluacionMembresia.motivoCodigo;
+        const motivo_texto = evaluacionMembresia.motivoTexto;
+        const estado_acceso = evaluacionMembresia.permitido ? "permitido" : "denegado";
+        const tipoAcceso = evaluacionMembresia.permitido ? tipo : "DENEGADO";
 
-        if (!membresiaActual) {
-            decision = "denegado"; motivo_codigo = "sin_membresia"; motivo_texto = "Socio sin membresía asignada"; estado_acceso = "denegado"; tipoAcceso = "DENEGADO";
-        } else if (new Date(membresiaActual.fechaFin) < hoy) {
-            decision = "denegado"; motivo_codigo = "membresia_vencida"; motivo_texto = "Membresía vencida"; estado_acceso = "denegado"; tipoAcceso = "DENEGADO";
-        } else if (membresiaActual.estadoPago === 'sin_pagar') {
-            decision = "denegado"; motivo_codigo = "sin_pago"; motivo_texto = "Membresía sin pagar"; estado_acceso = "denegado"; tipoAcceso = "DENEGADO";
+        if (evaluacionMembresia.permitido) {
+            await sincronizarEstadosVigentes(bestMatch, membresiaActual);
         }
 
         // REGISTRAR EN BITÁCORA (Tanto permitidos como denegados para trazabilidad)
@@ -316,8 +343,8 @@ export const registrarAsistenciaManual = async (req, res) => {
             where: { codigoSocio: clave },
             include: { 
                 membresias: { 
-                    where: { status: 'activa' }, 
-                    orderBy: { id: 'desc' }, 
+                    where: { status: { not: 'cancelada' } },
+                    orderBy: { fechaFin: 'desc' },
                     take: 1 
                 } 
             }
@@ -327,11 +354,20 @@ export const registrarAsistenciaManual = async (req, res) => {
             return res.status(404).json({ success: false, message: `No se encontró ningún socio con la clave: ${clave}` });
         }
 
-        const hoy = new Date();
-        const tieneMembresia = socio.membresias.length > 0 && new Date(socio.membresias[0].fechaFin) >= hoy;
+        const evaluacionMembresia = evaluarAccesoSocio(socio, socio.membresias[0]);
 
-        if (!tieneMembresia && tipo === 'IN') {
-             return res.status(403).json({ success: false, message: "El socio no tiene una membresía activa o vigente." });
+        if (!evaluacionMembresia.permitido && tipo === 'IN') {
+             return res.status(403).json({
+                 success: false,
+                 message: evaluacionMembresia.motivoTexto,
+                 data: {
+                     motivo_codigo: evaluacionMembresia.motivoCodigo
+                 }
+             });
+        }
+
+        if (tipo === 'IN') {
+            await sincronizarEstadosVigentes(socio, socio.membresias[0]);
         }
 
         const nuevoAcceso = await prisma.acceso.create({
@@ -341,8 +377,8 @@ export const registrarAsistenciaManual = async (req, res) => {
                 metodo: 'manual',
                 validado: true,
                 estadoAcceso: 'permitido',
-                motivoCodigo: 'ok',
-                motivo: notas || 'Ingreso manual por recepción',
+                motivoCodigo: tipo === 'IN' ? evaluacionMembresia.motivoCodigo : 'ok',
+                motivo: notas || (tipo === 'IN' ? evaluacionMembresia.motivoTexto : 'Salida manual por recepción'),
                 usuarioId: usuarioId
             }
         });
@@ -372,7 +408,11 @@ export const registrarAsistenciaManual = async (req, res) => {
 export const sincronizarHuellas = async (req, res) => {
     try {
         const sociosConHuella = await prisma.socio.findMany({
-            where: { status: 'activo', isDeleted: false, huellaTemplate: { not: null } },
+            where: {
+                status: { not: "bloqueado" },
+                isDeleted: false,
+                huellaTemplate: { not: null }
+            },
             select: { id: true, codigoSocio: true, huellaTemplate: true, huellaUpdatedAt: true }
         });
 
@@ -397,12 +437,13 @@ export const validarAsistenciaHuella = async (req, res) => {
         const socio = await prisma.socio.findFirst({
             where: {
                 OR: [ { id: parseInt(socioId) || undefined }, { codigoSocio: codigoSocio || undefined } ],
-                status: 'activo', isDeleted: false
+                status: { not: "bloqueado" },
+                isDeleted: false
             },
             include: { 
                 membresias: { 
-                    where: { status: 'activa' }, 
-                    orderBy: { id: 'desc' }, 
+                    where: { status: { not: 'cancelada' } },
+                    orderBy: { fechaFin: 'desc' },
                     take: 1, 
                     include: { plan: true } 
                 } 
@@ -410,14 +451,14 @@ export const validarAsistenciaHuella = async (req, res) => {
         });
 
         if (!socio) {
-            return res.status(404).json({ success: false, message: "Socio no encontrado o inactivo." });
+            return res.status(404).json({ success: false, message: "Socio no encontrado." });
         }
 
         const membresiaActual = socio.membresias[0];
-        const hoy = new Date();
+        const evaluacionMembresia = evaluarAccesoSocio(socio, membresiaActual);
 
-        // Si la membresía venció o no tiene, guardamos el log de DENEGADO sin romper la estructura de respuesta (403) del front viejo
-        if (!membresiaActual || new Date(membresiaActual.fechaFin) < hoy) {
+        // Guardamos el acceso denegado sin cambiar la estructura 403 consumida por el kiosco.
+        if (!evaluacionMembresia.permitido) {
             
             await prisma.acceso.create({
                 data: {
@@ -428,15 +469,16 @@ export const validarAsistenciaHuella = async (req, res) => {
                     confidence: confidence,
                     validado: false,
                     estadoAcceso: 'denegado',
-                    motivoCodigo: !membresiaActual ? 'sin_membresia' : 'membresia_vencida',
-                    motivo: !membresiaActual ? 'Sin membresía' : 'Membresía vencida'
+                    motivoCodigo: evaluacionMembresia.motivoCodigo,
+                    motivo: evaluacionMembresia.motivoTexto
                 }
             });
 
             return res.status(403).json({
                 success: false,
-                message: "Membresía vencida o inactiva",
+                message: evaluacionMembresia.motivoTexto,
                 data: {
+                    motivo_codigo: evaluacionMembresia.motivoCodigo,
                     socio: {
                         nombre_completo: socio.nombreCompleto,
                         codigo_socio: socio.codigoSocio,
@@ -447,10 +489,15 @@ export const validarAsistenciaHuella = async (req, res) => {
             });
         }
 
+        await sincronizarEstadosVigentes(socio, membresiaActual);
+
         const nuevoAcceso = await prisma.acceso.create({
             data: {
                 socioId: socio.id, tipo: tipo, dispositivoId: kioskId, metodo: 'huella', confidence: confidence,
-                validado: true, estadoAcceso: 'permitido', motivoCodigo: 'ok', motivo: 'Membresía vigente'
+                validado: true,
+                estadoAcceso: 'permitido',
+                motivoCodigo: evaluacionMembresia.motivoCodigo,
+                motivo: evaluacionMembresia.motivoTexto
             }
         });
 
@@ -458,6 +505,8 @@ export const validarAsistenciaHuella = async (req, res) => {
             success: true,
             message: `¡Bienvenido, ${socio.nombreCompleto.split(' ')[0]}!`,
             data: {
+                motivo_codigo: evaluacionMembresia.motivoCodigo,
+                motivo_texto: evaluacionMembresia.motivoTexto,
                 socio: {
                     id: socio.id, codigo_socio: socio.codigoSocio, nombre_completo: socio.nombreCompleto,
                     foto_perfil_url: socio.fotoUrl, membresia: membresiaActual.plan.nombre, fecha_fin_membresia: fechaUTCADiaStr(membresiaActual.fechaFin)
