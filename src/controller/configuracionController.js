@@ -44,6 +44,7 @@ const DEFAULT_TICKET = {
     gimnasioDomicilio: "Calle Zafiro Mza 1 Lote 8, entre Calle Plata y Brillante, en la Avenida CTM, frente al Soriana, Colonia Minas.",
     gimnasioTelefono: "+52 981 178 7040",
     gimnasioRFC: "XAXX010101000",
+    mostrarRFCEnTicket: true,
     gimnasioLogo: null, // Limpiamos el logo al restablecer
     ticketFooter: "¡Gracias por tu visita!",
     ticketMensajeAgradecimiento: "Te esperamos pronto"
@@ -71,6 +72,7 @@ const mapearConfiguracionRuntime = (config) => ({
     gimnasioDomicilio: config.gimnasioDomicilio,
     gimnasioTelefono: config.gimnasioTelefono,
     gimnasioRFC: config.gimnasioRFC,
+    mostrarRFCEnTicket: config.mostrarRFCEnTicket,
     gimnasioLogo: config.gimnasioLogo,
     ticketFooter: config.ticketFooter,
     ticketMensajeAgradecimiento: config.ticketMensajeAgradecimiento,
@@ -217,6 +219,7 @@ export const actualizarConfiguracionTotal = async (req, res) => {
             gimnasioDomicilio: body.gimnasioDomicilio,
             gimnasioTelefono: body.gimnasioTelefono,
             gimnasioRFC: body.gimnasioRFC ? body.gimnasioRFC.toUpperCase() : undefined,
+            mostrarRFCEnTicket: body.mostrarRFCEnTicket,
             gimnasioLogo: body.gimnasioLogo || null,
             ticketFooter: body.ticketFooter,
             ticketMensajeAgradecimiento: body.ticketMensajeAgradecimiento,
@@ -265,7 +268,16 @@ export const actualizarApariencia = async (req, res) => {
 // PATCH Solo Ticket
 export const actualizarTicket = async (req, res) => {
     try {
-        const { gimnasioNombre, gimnasioDomicilio, gimnasioTelefono, gimnasioRFC, gimnasioLogo, ticketFooter, ticketMensajeAgradecimiento } = req.body;
+        const {
+            gimnasioNombre,
+            gimnasioDomicilio,
+            gimnasioTelefono,
+            gimnasioRFC,
+            mostrarRFCEnTicket,
+            gimnasioLogo,
+            ticketFooter,
+            ticketMensajeAgradecimiento
+        } = req.body;
 
         try { if (gimnasioLogo) validarBase64(gimnasioLogo, 'gimnasioLogo'); } 
         catch (err) { return res.status(400).json({ success: false, message: "Logo inválido", errors: [{ detail: err.message }] }); }
@@ -275,6 +287,7 @@ export const actualizarTicket = async (req, res) => {
             data: {
                 gimnasioNombre, gimnasioDomicilio, gimnasioTelefono, 
                 gimnasioRFC: gimnasioRFC ? gimnasioRFC.toUpperCase() : undefined,
+                ...(typeof mostrarRFCEnTicket === 'boolean' && { mostrarRFCEnTicket }),
                 ticketFooter, ticketMensajeAgradecimiento,
                 ...(gimnasioLogo !== undefined && { gimnasioLogo }),
                 updatedBy: req.user.id

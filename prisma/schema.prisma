@@ -892,6 +892,7 @@ model ConfiguracionSistema {
   gimnasioDomicilio           String    @map("gimnasio_domicilio") @db.VarChar(255)
   gimnasioTelefono            String    @map("gimnasio_telefono") @db.VarChar(30)
   gimnasioRFC                 String    @map("gimnasio_rfc") @db.VarChar(13)
+  mostrarRFCEnTicket          Boolean   @default(true) @map("mostrar_rfc_en_ticket")
   gimnasioLogo                String?   @map("gimnasio_logo") @db.Text
   ticketFooter                String    @map("ticket_footer") @db.VarChar(100)
   ticketMensajeAgradecimiento String    @map("ticket_mensaje_agradecimiento") @db.VarChar(200)

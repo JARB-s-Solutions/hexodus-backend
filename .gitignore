@@ -152,3 +152,4 @@ temp
 .github
 
 *.sql
+!prisma/migrations/**/*.sql
