@@ -21,6 +21,7 @@ import auditoriaRoutes from "./auditoriaRoutes.js";
 import alertaRoutes from "./alertaRoutes.js";
 import backupRoutes from "./backupRoutes.js";
 import configuracionRoutes from "./configuracionRoutes.js";
+import sociosAppRoutes from "../modules/sociosApp/routes/sociosApp.routes.js";
 
 const router = Router();
 
@@ -46,5 +47,6 @@ router.use("/auditoria", auditoriaRoutes);
 router.use("/alertas", alertaRoutes);
 router.use("/backups", backupRoutes);
 router.use("/configuracion", configuracionRoutes);
+router.use("/app/socios", sociosAppRoutes);
 
 export default router;
