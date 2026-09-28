@@ -1,6 +1,8 @@
 import prisma from "../config/prisma.js";
-import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida, fechaUTCADiaStr } from "../utils/timezone.js";
+import ExcelJS from "exceljs";
+import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida, fechaUTCADiaStr, partesEnMerida } from "../utils/timezone.js";
 import { evaluarAccesoSocio } from "../utils/membresiaVigencia.js";
+import { calcularResumenHorarioAsistencias } from "../utils/asistenciaReporte.js";
 
 const calcularDistancia = (desc1, desc2) => {
     if (!desc1 || !desc2 || desc1.length !== desc2.length) return 1.0; 
@@ -160,6 +162,65 @@ export const validarAsistenciaFacial = async (req, res) => {
     }
 };
 
+const construirFiltrosHistorial = ({ fecha_inicio, fecha_fin, tipo, metodo, search, estado }) => {
+    const condiciones = [];
+
+    if (fecha_inicio || fecha_fin) {
+        const fechaHora = {};
+        if (fecha_inicio) fechaHora.gte = fechaStrAInicio(fecha_inicio);
+        if (fecha_fin) fechaHora.lte = fechaStrAFin(fecha_fin);
+        condiciones.push({ fechaHora });
+    }
+
+    if (tipo) condiciones.push({ tipo });
+    if (metodo) condiciones.push({ metodo });
+
+    if (estado === "denegado") {
+        condiciones.push({
+            OR: [
+                { tipo: "DENEGADO" },
+                { estadoAcceso: { equals: "denegado", mode: "insensitive" } }
+            ]
+        });
+    } else if (estado === "permitido") {
+        condiciones.push({
+            AND: [
+                { tipo: { not: "DENEGADO" } },
+                { estadoAcceso: { not: "denegado" } }
+            ]
+        });
+    }
+
+    if (search?.trim()) {
+        condiciones.push({
+            socio: {
+                OR: [
+                    { nombreCompleto: { contains: search.trim(), mode: "insensitive" } },
+                    { codigoSocio: { contains: search.trim(), mode: "insensitive" } }
+                ]
+            }
+        });
+    }
+
+    return condiciones.length > 0 ? { AND: condiciones } : {};
+};
+
+const aplicarEstiloEncabezado = (row) => {
+    row.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDC2626" } };
+    row.alignment = { vertical: "middle", horizontal: "center" };
+};
+
+const ajustarColumnas = (worksheet, maxWidth = 45) => {
+    worksheet.columns.forEach((column) => {
+        let width = 10;
+        column.eachCell?.({ includeEmpty: true }, (cell) => {
+            width = Math.max(width, String(cell.value ?? "").length + 2);
+        });
+        column.width = Math.min(width, maxWidth);
+    });
+};
+
 // HISTORIAL GENERAL DE ASISTENCIAS
 export const obtenerHistorialAsistencias = async (req, res) => {
     try {
@@ -167,27 +228,7 @@ export const obtenerHistorialAsistencias = async (req, res) => {
         const limit = parseInt(req.query.limit) || 50;
         const skip = (page - 1) * limit;
 
-        const { fecha_inicio, fecha_fin, tipo, metodo, search } = req.query;
-        let whereClause = {};
-
-        if (fecha_inicio && fecha_fin) {
-            whereClause.fechaHora = {
-                gte: fechaStrAInicio(fecha_inicio),
-                lte: fechaStrAFin(fecha_fin)
-            };
-        }
-
-        if (tipo) whereClause.tipo = tipo; 
-        if (metodo) whereClause.metodo = metodo; 
-
-        if (search) {
-            whereClause.socio = {
-                OR: [
-                    { nombreCompleto: { contains: search, mode: 'insensitive' } },
-                    { codigoSocio: { contains: search, mode: 'insensitive' } }
-                ]
-            };
-        }
+        const whereClause = construirFiltrosHistorial(req.query);
 
         const [totalRecords, accesos] = await Promise.all([
             prisma.acceso.count({ where: whereClause }),
@@ -221,6 +262,116 @@ export const obtenerHistorialAsistencias = async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, message: "Error al obtener el historial." });
+    }
+};
+
+// EXPORTAR EL HISTORIAL COMPLETO FILTRADO A EXCEL (sin paginación)
+export const exportarHistorialAsistencias = async (req, res) => {
+    try {
+        const { fecha_inicio, fecha_fin } = req.query;
+
+        if (fecha_inicio && fecha_fin && fecha_fin < fecha_inicio) {
+            return res.status(400).json({
+                success: false,
+                message: "La fecha final no puede ser anterior a la fecha inicial."
+            });
+        }
+
+        const whereClause = construirFiltrosHistorial(req.query);
+        const accesos = await prisma.acceso.findMany({
+            where: whereClause,
+            orderBy: { fechaHora: "desc" },
+            include: {
+                socio: {
+                    select: { nombreCompleto: true, codigoSocio: true }
+                },
+                validador: { select: { nombreCompleto: true } }
+            }
+        });
+
+        const {
+            entradasPermitidas,
+            entradasManana,
+            sociosUnicos,
+            sociosUnicosManana,
+            porcentajeManana,
+            porcentajeSociosManana,
+            distribucionHoraria
+        } = calcularResumenHorarioAsistencias(accesos);
+
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = "Hexodus";
+        workbook.created = new Date();
+
+        const resumen = workbook.addWorksheet("Resumen");
+        resumen.addRow(["REPORTE DE ASISTENCIAS"]);
+        resumen.getCell("A1").font = { bold: true, size: 16 };
+        resumen.addRow(["Periodo", fecha_inicio && fecha_fin ? `${fecha_inicio} al ${fecha_fin}` : fecha_inicio ? `Desde ${fecha_inicio}` : fecha_fin ? `Hasta ${fecha_fin}` : "Todo el historial"]);
+        resumen.addRow(["Método", req.query.metodo || "Todos"]);
+        resumen.addRow(["Estado", req.query.estado || "Todos"]);
+        resumen.addRow(["Búsqueda", req.query.search || "Sin búsqueda"]);
+        resumen.addRow(["Definición de mañana", "00:00 a 11:59 (hora de Mérida)"]);
+        resumen.addRow([]);
+        aplicarEstiloEncabezado(resumen.addRow(["Indicador", "Resultado"]));
+        resumen.addRow(["Registros exportados", accesos.length]);
+        resumen.addRow(["Entradas permitidas", entradasPermitidas.length]);
+        resumen.addRow(["Entradas durante la mañana", entradasManana.length]);
+        const filaPorcentaje = resumen.addRow(["Porcentaje de entradas en la mañana", porcentajeManana / 100]);
+        filaPorcentaje.getCell(2).numFmt = "0.00%";
+        resumen.addRow(["Socios únicos con entrada", sociosUnicos.size]);
+        resumen.addRow(["Socios únicos que llegaron en la mañana", sociosUnicosManana.size]);
+        const filaPorcentajeSocios = resumen.addRow(["Porcentaje de socios que llegaron en la mañana", porcentajeSociosManana / 100]);
+        filaPorcentajeSocios.getCell(2).numFmt = "0.00%";
+        ajustarColumnas(resumen);
+
+        const horas = workbook.addWorksheet("Distribución por hora");
+        aplicarEstiloEncabezado(horas.addRow(["Hora", "Entradas permitidas", "Porcentaje"]));
+        distribucionHoraria.forEach(({ hora, entradas }) => {
+            const row = horas.addRow([
+                `${String(hora).padStart(2, "0")}:00 - ${String(hora).padStart(2, "0")}:59`,
+                entradas,
+                entradasPermitidas.length > 0 ? entradas / entradasPermitidas.length : 0
+            ]);
+            row.getCell(3).numFmt = "0.00%";
+        });
+        horas.views = [{ state: "frozen", ySplit: 1 }];
+        horas.autoFilter = "A1:C25";
+        ajustarColumnas(horas);
+
+        const detalle = workbook.addWorksheet("Asistencias");
+        aplicarEstiloEncabezado(detalle.addRow([
+            "Fecha", "Hora", "Socio", "Código", "Tipo", "Estado", "Método",
+            "Confianza", "Motivo", "Validador manual"
+        ]));
+        accesos.forEach((acceso) => {
+            const p = partesEnMerida(acceso.fechaHora);
+            const row = detalle.addRow([
+                `${String(p.day).padStart(2, "0")}/${String(p.month).padStart(2, "0")}/${p.year}`,
+                `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}:${String(p.second).padStart(2, "0")}`,
+                acceso.socio.nombreCompleto,
+                acceso.socio.codigoSocio,
+                acceso.tipo,
+                acceso.estadoAcceso,
+                acceso.metodo,
+                acceso.confidence == null ? "N/A" : parseFloat(acceso.confidence) / 100,
+                acceso.motivo || "",
+                acceso.validador?.nombreCompleto || ""
+            ]);
+            if (acceso.confidence != null) row.getCell(8).numFmt = "0.0%";
+        });
+        detalle.views = [{ state: "frozen", ySplit: 1 }];
+        if (accesos.length > 0) detalle.autoFilter = `A1:J${accesos.length + 1}`;
+        ajustarColumnas(detalle);
+
+        const fechaArchivo = fechaUTCADiaStr(new Date());
+        const buffer = await workbook.xlsx.writeBuffer();
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="asistencias_${fechaArchivo}.xlsx"`);
+        res.setHeader("Content-Length", buffer.length);
+        return res.status(200).send(Buffer.from(buffer));
+    } catch (error) {
+        console.error("Error al exportar asistencias:", error);
+        return res.status(500).json({ success: false, message: "Error al generar el reporte de asistencias." });
     }
 };
 

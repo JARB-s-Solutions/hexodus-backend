@@ -88,32 +88,7 @@ registro. La consulta no modifica datos.
 ## Módulo `sociosApp`
 
 Los modelos `SocioAppAccount`, `SocioAppOtp`, `SocioAppSession` y
-`SocioAppAuthEvent` se crean mediante la migración posterior e independiente
-`20260907000000_add_socios_app_auth`. El esquema y los repositorios que usan
-estas tablas ya están presentes en el backend; esta entrega incorpora el SQL
-faltante, sin cambiar los endpoints ni el flujo de autenticación.
-
-`prisma migrate deploy` aplica todas las migraciones pendientes, incluida la
-de `sociosApp`. Antes de ejecutarlo, comprobar en desarrollo el flujo de OTP,
-creación y revocación de sesiones, y consulta del perfil; confirmar también la
-configuración de correo y `JWT_SECRET` del entorno de destino.
-
-La migración de `sociosApp` no es idempotente. Si alguna tabla `socio_app_*` ya
-existe sin su registro de migración, detener el despliegue y reconciliar el
-esquema y el historial antes de continuar. No marcarla como aplicada sin
-verificar todas sus tablas, columnas, índices y claves foráneas.
-
-Después del despliegue, comprobar que
-`20260907000000_add_socios_app_auth` también figura como aplicada. Las tablas
-nuevas no cargan cuentas ni sesiones iniciales; el backend las crea durante
-el uso de la aplicación. La migración de configuración tampoco inserta un
-registro singleton en una base vacía: conserva el existente cuando lo hay.
-
-## Alcance de la validación de esta entrega
-
-Se ejecutaron las 12 pruebas unitarias existentes de fechas y vigencia de
-membresías, la instalación con `npm ci` (incluida la generación del cliente
-Prisma) y `prisma validate` con URLs locales de ejemplo, sin conexión a una
-base de datos. Estas comprobaciones no sustituyen las pruebas de migración
-y autenticación en desarrollo. No se aplicaron migraciones ni se modificó
-la base de producción al preparar el pull request.
+`SocioAppAuthEvent` pertenecen a una evolución distinta. Sus tablas deben
+crearse en una migración posterior e independiente. No deben incorporarse a la
+migración de configuración ni desplegarse en producción hasta que el backend
+de la aplicación de socios esté listo para publicarse.
