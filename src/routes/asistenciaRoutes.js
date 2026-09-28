@@ -2,6 +2,7 @@ import { Router } from "express";
 import { 
     validarAsistenciaFacial, 
     obtenerHistorialAsistencias,
+    exportarHistorialAsistencias,
     obtenerAsistenciasHoy,
     obtenerAsistenciasSocio,
     registrarAsistenciaManual,
@@ -28,6 +29,9 @@ router.post("/huellas/validar", verificarToken, validarAsistenciaHuella);
 // RUTAS ADMINISTRATIVAS / DASHBOARDS
 // Ver el historial general
 router.get("/", verificarPermiso("asistencia", "ver"), obtenerHistorialAsistencias);
+
+// Exportar todo el historial filtrado, sin depender de la paginación visual
+router.get("/exportar", verificarPermiso("asistencia", "exportar"), exportarHistorialAsistencias);
 
 // Ver asistencias del día actual
 router.get("/hoy", verificarPermiso("asistencia", "ver"), obtenerAsistenciasHoy);
