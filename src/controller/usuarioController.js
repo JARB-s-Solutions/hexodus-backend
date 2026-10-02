@@ -271,6 +271,21 @@ export const actualizarUsuario = async (req, res) => {
         const { id } = req.params;
         const { nombre, email, username, telefono, password, rolId, activo } = req.body;
 
+        if (password !== undefined) {
+            if (typeof password !== 'string' || password.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    error: { message: "La contraseña debe tener al menos 6 caracteres" }
+                });
+            }
+            if (password.length > 72) {
+                return res.status(400).json({
+                    success: false,
+                    error: { message: "La contraseña no puede exceder 72 caracteres" }
+                });
+            }
+        }
+
         const usuarioActual = await prisma.usuario.findUnique({ where: { uid: id } });
         
         if (!usuarioActual) {
@@ -317,6 +332,8 @@ export const actualizarUsuario = async (req, res) => {
         if (password) {
             const salt = await bcrypt.genSalt(10);
             dataUpdate.password = await bcrypt.hash(password, salt);
+            dataUpdate.passwordResetToken = null;
+            dataUpdate.passwordResetExpires = null;
         }
 
         // 4. Ejecutamos la actualización
@@ -331,7 +348,7 @@ export const actualizarUsuario = async (req, res) => {
             accion: 'editar',
             modulo: 'usuarios',
             registroId: id,
-            detalles: `Se editaron los datos del usuario "${usuarioActualizado.nombreCompleto}" (@${usuarioActualizado.username}) — Rol asignado: ${usuarioActualizado.rol.nombre}`
+            detalles: `Se editaron los datos del usuario "${usuarioActualizado.nombreCompleto}" (@${usuarioActualizado.username}) — Rol asignado: ${usuarioActualizado.rol.nombre}${password ? ' — Contraseña restablecida desde Gestión de Usuarios' : ''}`
         });
 
         res.status(200).json({
