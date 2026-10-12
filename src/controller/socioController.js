@@ -9,6 +9,9 @@ import {
 } from "../utils/timezone.js";
 import { inicioDiaMembresia } from "../utils/membresiaVigencia.js";
 import { calcularFechaFinMembresia } from "../utils/membresiaFechas.js";
+import { prepareFingerprint, consumeEnrollmentProof } from "../services/biometriaService.js";
+import { exigirPermisosActuales } from "../middlewares/biometriaMiddleware.js";
+import { biometricErrorResponse } from "../utils/biometriaContrato.js";
 
 // AYUDANTES DE VALIDACIÓN GLOBALES
 const validarFecha = (fechaStr, nombreCampo) => {
@@ -285,6 +288,9 @@ export const crearSocio = async (req, res) => {
   try {
     const { personal, biometria, detalles_contrato, membresia } = req.body;
 
+    const fingerprint = prepareFingerprint(biometria, null);
+    if (fingerprint.changed) await exigirPermisosActuales(req, [["biometria", "enrolar"], ["socios", "crear"]]);
+
     if (!personal || !personal.nombre_completo || !personal.genero) {
       return res
         .status(400)
@@ -292,6 +298,7 @@ export const crearSocio = async (req, res) => {
     }
 
     const resultadoTransaccion = await prisma.$transaction(async (tx) => {
+      await consumeEnrollmentProof(tx, fingerprint);
       // CREAR SOCIO Y BIOMETRÍA
       const nuevoSocio = await tx.socio.create({
         data: {
@@ -310,13 +317,8 @@ export const crearSocio = async (req, res) => {
                 "Actualización Facial",
               )
             : null,
-          huellaTemplate: biometria?.fingerprint_template || null,
-          huellaUpdatedAt: biometria?.fingerprint_updated_at
-            ? validarFecha(
-                biometria.fingerprint_updated_at,
-                "Actualización Huella",
-              )
-            : null,
+          huellaTemplate: fingerprint.changed ? fingerprint.template : null,
+          huellaUpdatedAt: fingerprint.changed ? new Date() : null,
         },
       });
 
@@ -488,7 +490,9 @@ export const crearSocio = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error al crear socio:", error);
+    const cambioHuella = Object.hasOwn(req.body?.biometria || {}, "fingerprint_template");
+    if (cambioHuella && biometricErrorResponse(res, error)) return;
+    console.error("Error al crear socio:", cambioHuella ? { name: error?.name, code: error?.code } : error);
 
     // Manejo de Errores UX mejorado (Evita los 500 genéricos)
     if (error.message.startsWith("UX_ERROR:"))
@@ -993,8 +997,12 @@ export const actualizarSocio = async (req, res) => {
     if (!socioExistente || socioExistente.isDeleted)
       return res.status(404).json({ error: "Socio no encontrado." });
 
+    const fingerprint = prepareFingerprint(biometria, socioExistente.codigoSocio);
+    if (fingerprint.changed) await exigirPermisosActuales(req, [["biometria", "enrolar"], ["socios", "editar"]]);
+
     await prisma.$transaction(
       async (tx) => {
+        await consumeEnrollmentProof(tx, fingerprint);
         // ACTUALIZAR DATOS PERSONALES Y BIOMETRÍA
         let dataSocio = {};
         if (personal) {
@@ -1014,8 +1022,8 @@ export const actualizarSocio = async (req, res) => {
             dataSocio.faceEncoding = biometria.face_encoding;
             dataSocio.faceEncodingUpdatedAt = new Date();
           }
-          if (biometria.fingerprint_template !== undefined) {
-            dataSocio.huellaTemplate = biometria.fingerprint_template;
+          if (fingerprint.changed) {
+            dataSocio.huellaTemplate = fingerprint.template;
             dataSocio.huellaUpdatedAt = new Date();
           }
         }
@@ -1360,7 +1368,9 @@ export const actualizarSocio = async (req, res) => {
       .status(200)
       .json({ message: "Perfil del socio actualizado correctamente." });
   } catch (error) {
-    console.error("Error al actualizar socio:", error);
+    const cambioHuella = Object.hasOwn(req.body?.biometria || {}, "fingerprint_template");
+    if (cambioHuella && biometricErrorResponse(res, error)) return;
+    console.error("Error al actualizar socio:", cambioHuella ? { name: error?.name, code: error?.code } : error);
 
     // Manejo de Errores UX mejorado (Evita los 500 genéricos)
     if (error.message.startsWith("UX_ERROR:"))

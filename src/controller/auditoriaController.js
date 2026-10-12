@@ -6,7 +6,12 @@ export const listarLogs = async (req, res) => {
         const limit = 50;
         const skip = (page - 1) * limit;
 
-        const where = {};
+        // Technical receipts use the existing audit storage but are not human audit entries.
+        // Keep signed receipts out of the general audit API, even with an explicit module filter.
+        const where = { NOT: [
+            { id: { startsWith: "bio-event:" } },
+            { id: { startsWith: "bio-proof:" } },
+        ] };
         if (modulo) where.modulo = modulo;
         if (usuarioId) where.usuarioId = parseInt(usuarioId);
         if (accion) where.accion = accion;
