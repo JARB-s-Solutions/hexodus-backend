@@ -8,7 +8,8 @@ import {
     registrarAsistenciaManual,
     sincronizarHuellas,
     validarAsistenciaHuella,
-    marcarAsistenciaDenegada
+    marcarAsistenciaDenegada,
+    crearSesionBiometrica
 } from "../controller/asistenciaController.js";
 import { verificarToken, verificarPermiso } from "../middlewares/authMiddleware.js"; 
 
@@ -22,9 +23,10 @@ router.use(verificarToken);
 router.post("/validar", verificarPermiso("asistencia", "crear"), validarAsistenciaFacial);
 
 // RUTAS BIOMÉTRICAS LOCALES (HUELLA)
-router.get("/huellas/sincronizar", verificarToken, sincronizarHuellas);
+router.post("/huellas/sesion", crearSesionBiometrica);
+router.get("/huellas/sincronizar", sincronizarHuellas);
 // Ruta para registrar la entrada cuando el lector local hace Match
-router.post("/huellas/validar", verificarToken, validarAsistenciaHuella);
+router.post("/huellas/validar", validarAsistenciaHuella);
 
 // RUTAS ADMINISTRATIVAS / DASHBOARDS
 // Ver el historial general

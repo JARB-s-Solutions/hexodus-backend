@@ -14,6 +14,26 @@ const membresiaPagada = {
   estadoPago: "pagado",
 };
 
+test("huella avisa dos días antes, mañana y hoy según fecha local; fuera de esa ventana no avisa", () => {
+  for (const day of [27, 28, 29, 30]) {
+    for (const hour of [0, 23]) {
+      const result = evaluarAccesoSocio({ status: 'activo', isDeleted: false }, membresiaPagada, localAUTC(2026, 6, day, hour, 59), 2);
+      assert.equal(result.permitido, true);
+      assert.equal(result.motivoCodigo, day >= 28 ? 'proximo_vencer' : 'ok');
+      if (day === 28) assert.match(result.motivoTexto, /2 días/);
+      if (day === 29) assert.match(result.motivoTexto, /1 día/);
+    }
+  }
+  const end = { ...membresiaPagada, fechaFin: localAUTC(2026, 7, 1) };
+  assert.equal(evaluarAccesoMembresia(end, localAUTC(2026, 6, 29), 2).motivoCodigo, 'proximo_vencer');
+  for (const day of [28, 29, 30]) {
+    const when = localAUTC(2026, 6, day);
+    assert.equal(evaluarAccesoMembresia({ ...membresiaPagada, estadoPago: 'sin_pagar' }, when, 2).permitido, false);
+    assert.equal(evaluarAccesoSocio({ status: 'bloqueado' }, membresiaPagada, when, 2).permitido, false);
+  }
+  assert.equal(evaluarAccesoMembresia(membresiaPagada, localAUTC(2026, 7, 1), 2).motivoCodigo, 'membresia_vencida');
+});
+
 test("permite acceso durante todo el último día local", () => {
   const duranteElDia = [
     localAUTC(2026, 6, 30, 0, 0, 0, 0),

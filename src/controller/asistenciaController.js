@@ -3,6 +3,20 @@ import ExcelJS from "exceljs";
 import { rangoDiaHoy, fechaStrAInicio, fechaStrAFin, horaStringMerida, fechaUTCAISOEnMerida, fechaUTCADiaStr, partesEnMerida } from "../utils/timezone.js";
 import { evaluarAccesoSocio } from "../utils/membresiaVigencia.js";
 import { calcularResumenHorarioAsistencias } from "../utils/asistenciaReporte.js";
+import { createBiometricService } from "../services/biometriaService.js";
+import { exigirPermisosActuales } from "../middlewares/biometriaMiddleware.js";
+import { biometricErrorResponse, legacyEnabled, validateLegacyAttendance, BiometricError } from "../utils/biometriaContrato.js";
+
+const biometria = createBiometricService({ db: prisma, requirePermissions: exigirPermisosActuales });
+
+export const crearSesionBiometrica = async (req, res) => {
+    try {
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(200).json(await biometria.session(req));
+    } catch (error) {
+        if (!biometricErrorResponse(res, error)) res.status(503).json({ success: false, message: "No se pudo iniciar la sesión del motor." });
+    }
+};
 
 const calcularDistancia = (desc1, desc2) => {
     if (!desc1 || !desc2 || desc1.length !== desc2.length) return 1.0; 
@@ -558,6 +572,11 @@ export const registrarAsistenciaManual = async (req, res) => {
 // SINCRONIZAR HUELLAS (Kiosko Local)
 export const sincronizarHuellas = async (req, res) => {
     try {
+        res.setHeader("Cache-Control", "no-store");
+        if (req.query.kioskId !== undefined || !legacyEnabled()) {
+            return res.status(200).json(await biometria.snapshot(req));
+        }
+        await exigirPermisosActuales(req, [["biometria", "sincronizar"]]);
         const sociosConHuella = await prisma.socio.findMany({
             where: {
                 status: { not: "bloqueado" },
@@ -572,6 +591,7 @@ export const sincronizarHuellas = async (req, res) => {
             data: sociosConHuella, total: sociosConHuella.length
         });
     } catch (error) {
+        if (biometricErrorResponse(res, error)) return;
         res.status(500).json({ success: false, message: "Error interno al obtener los templates biométricos." });
     }
 };
@@ -579,15 +599,18 @@ export const sincronizarHuellas = async (req, res) => {
 // VALIDAR ASISTENCIA (Huella Dactilar Local)
 export const validarAsistenciaHuella = async (req, res) => {
     try {
-        const { socioId, codigoSocio, tipo = 'IN', kioskId, confidence = 100 } = req.body;
-
-        if (!socioId && !codigoSocio) {
-            return res.status(400).json({ success: false, message: "Debes enviar el ID o Código del socio reconocido." });
+        res.setHeader("Cache-Control", "no-store");
+        if (req.body?.eventProof !== undefined) {
+            return res.status(200).json(await biometria.recognize(req));
         }
+        if (!legacyEnabled()) throw new BiometricError(403, "EVENT_PROOF_REQUIRED", "Se requiere un evento firmado por el motor autorizado.");
+        await exigirPermisosActuales(req, [["asistencia", "crear"]]);
+        const socioWhere = validateLegacyAttendance(req.body);
+        const { tipo = 'IN', kioskId, confidence = null } = req.body;
 
         const socio = await prisma.socio.findFirst({
             where: {
-                OR: [ { id: parseInt(socioId) || undefined }, { codigoSocio: codigoSocio || undefined } ],
+                ...socioWhere,
                 status: { not: "bloqueado" },
                 isDeleted: false
             },
@@ -670,6 +693,7 @@ export const validarAsistenciaHuella = async (req, res) => {
         });
 
     } catch (error) {
+        if (biometricErrorResponse(res, error)) return;
         res.status(500).json({ success: false, message: "Error interno del servidor." });
     }
 };

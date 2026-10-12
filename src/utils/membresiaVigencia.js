@@ -22,7 +22,7 @@ export const esUltimoDiaMembresia = (membresia, fecha = new Date()) => {
   return fechaUTCADiaStr(membresia.fechaFin) === fechaUTCADiaStr(fecha);
 };
 
-export const evaluarAccesoMembresia = (membresia, fecha = new Date()) => {
+export const evaluarAccesoMembresia = (membresia, fecha = new Date(), diasAviso = 0) => {
   if (!membresia) {
     return {
       permitido: false,
@@ -53,14 +53,19 @@ export const evaluarAccesoMembresia = (membresia, fecha = new Date()) => {
     };
   }
 
-  const ultimoDia = esUltimoDiaMembresia(membresia, fecha);
+  // Compare calendar days in the gym's timezone, not elapsed 24-hour periods.
+  const diasRestantes = Math.round((Date.parse(fechaUTCADiaStr(membresia.fechaFin)) - Date.parse(fechaUTCADiaStr(fecha))) / 86400000);
+  const ultimoDia = diasRestantes === 0;
+  const proximoVencer = diasRestantes >= 0 && diasRestantes <= diasAviso;
 
   return {
     permitido: true,
-    estado: ultimoDia ? "proximo_vencer" : "vigente",
-    motivoCodigo: ultimoDia ? "proximo_vencer" : "ok",
+    estado: proximoVencer ? "proximo_vencer" : "vigente",
+    motivoCodigo: proximoVencer ? "proximo_vencer" : "ok",
     motivoTexto: ultimoDia
       ? "Membresía vigente en su último día"
+      : proximoVencer
+      ? `Tu membresía vence en ${diasRestantes} ${diasRestantes === 1 ? "día" : "días"}`
       : "Membresía vigente",
   };
 };
@@ -69,6 +74,7 @@ export const evaluarAccesoSocio = (
   socio,
   membresia,
   fecha = new Date(),
+  diasAviso = 0,
 ) => {
   if (!socio || socio.isDeleted) {
     return {
@@ -88,5 +94,5 @@ export const evaluarAccesoSocio = (
     };
   }
 
-  return evaluarAccesoMembresia(membresia, fecha);
+  return evaluarAccesoMembresia(membresia, fecha, diasAviso);
 };
