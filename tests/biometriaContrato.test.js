@@ -97,10 +97,21 @@ test("orígenes exactos y capability limitada de enrollment", async () => {
   assert.deepEqual(checks[0], [["biometria", "enrolar"], ["biometria", "sincronizar"], ["socios", "crear"]]);
 });
 
+test("sesión de kiosco exige asistencia y sincronización biométrica", async () => {
+  const checks = [];
+  const service = createBiometricService({ db: {}, env, clock: () => now, requirePermissions: async (_, permissions) => checks.push(permissions) });
+  await service.session({ body: { kioskId: "TEST-KIOSK", scope: "kiosk" }, headers: { origin: "https://gym.example" } });
+  assert.deepEqual(checks[0], [["asistencia", "crear"], ["biometria", "sincronizar"]]);
+});
+
 test("permisos actuales invalidan token de administrador antiguo y usuario bloqueado", async () => {
   const oldAdminRequest = () => ({ user: { id: 1, rol: { esAdministrador: true }, permisos: { biometria: { sincronizar: true } } } });
   const revokedRole = { $queryRaw: async () => [{ id: 1, status: "activo", rolId: "operator", esAdministrador: false, permisos: {} }] };
   await assert.rejects(exigirPermisosActuales(oldAdminRequest(), [["biometria", "sincronizar"]], revokedRole), { code: "BIOMETRIC_PERMISSION" });
+  const receptionist = { $queryRaw: async () => [{ id: 2, status: "activo", rolId: "recepcionista", esAdministrador: false,
+    permisos: { asistencia: { crear: true }, biometria: { sincronizar: true, enrolar: false } } }] };
+  await exigirPermisosActuales({ user: { id: 2 } }, [["asistencia", "crear"], ["biometria", "sincronizar"]], receptionist);
+  await assert.rejects(exigirPermisosActuales({ user: { id: 2 } }, [["biometria", "enrolar"]], receptionist), { code: "BIOMETRIC_PERMISSION" });
   const inactive = { $queryRaw: async () => [{ id: 1, status: "bloqueado", rolId: "admin", esAdministrador: true }] };
   await assert.rejects(exigirPermisosActuales(oldAdminRequest(), [], inactive), { code: "SESSION_INACTIVE" });
 });
