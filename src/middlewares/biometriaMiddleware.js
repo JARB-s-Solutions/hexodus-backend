@@ -5,9 +5,9 @@ import { BiometricError, biometricErrorResponse } from '../utils/biometriaContra
 // Sensitive biometric operations must honor role changes and disabled users immediately.
 export async function cargarUsuarioActual(req, db = prisma) {
     if (req.biometricUser) return req.biometricUser;
-    if (!Number.isSafeInteger(req.user?.id) || req.user.id <= 0) throw new BiometricError(401, 'SESSION_INVALID', 'La sesiÃ³n no es vÃ¡lida.');
+    if (!Number.isSafeInteger(req.user?.id) || req.user.id <= 0) throw new BiometricError(401, 'SESSION_INVALID', 'La sesión no es válida.');
     const current = await leerUsuarioBiometrico(db, req.user.id);
-    if (!current || current.status !== 'activo' || !current.rol) throw new BiometricError(401, 'SESSION_INACTIVE', 'La sesiÃ³n ya no estÃ¡ autorizada. Inicia sesiÃ³n nuevamente.');
+    if (!current || current.status !== 'activo' || !current.rol) throw new BiometricError(401, 'SESSION_INACTIVE', 'La sesión ya no está autorizada. Inicia sesión nuevamente.');
     let permisos = current.rol.permisos;
     if (typeof permisos === 'string') {
         try { permisos = JSON.parse(permisos); } catch { permisos = {}; }
@@ -19,7 +19,7 @@ export async function cargarUsuarioActual(req, db = prisma) {
 export async function exigirPermisosActuales(req, requirements, db = prisma) {
     const current = await cargarUsuarioActual(req, db);
     if (!current.rol.esAdministrador && requirements.some(([modulo, accion]) => current.permisos?.[modulo]?.[accion] !== true)) {
-        throw new BiometricError(403, 'BIOMETRIC_PERMISSION', 'No tienes permiso para realizar esta operaciÃ³n biomÃ©trica.');
+        throw new BiometricError(403, 'BIOMETRIC_PERMISSION', 'No tienes permiso para realizar esta operación biométrica.');
     }
     return current;
 }
@@ -29,6 +29,6 @@ export const verificarPermisosActuales = (...requirements) => async (req, res, n
         await exigirPermisosActuales(req, requirements);
         next();
     } catch (error) {
-        if (!biometricErrorResponse(res, error)) res.status(503).json({ success: false, message: 'No se pudo verificar la autorizaciÃ³n actual.' });
+        if (!biometricErrorResponse(res, error)) res.status(503).json({ success: false, message: 'No se pudo verificar la autorización actual.' });
     }
 };
