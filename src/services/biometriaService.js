@@ -85,7 +85,7 @@ export function createBiometricService({ db, env = process.env, clock = () => ne
       }
       const origin = allowedOrigin(req.headers.origin, env);
       const now = clock();
-      const expiresAtUtc = new Date(now.getTime() + 600_000).toISOString();
+      const expiresAtUtc = new Date(now.getTime() + (req.body.scope === "kiosk" ? 8 * 60 * 60_000 : 600_000)).toISOString();
       const motorToken = signToken({ v: 1, purpose: "session", kioskId: id, scope: req.body.scope,
         codigoSocio: target, origin, issuedAtUtc: now.toISOString(), expiresAtUtc }, env);
       return { success: true, data: { motorToken, expiresAtUtc } };

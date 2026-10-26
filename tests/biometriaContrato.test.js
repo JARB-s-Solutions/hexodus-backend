@@ -100,7 +100,9 @@ test("orígenes exactos y capability limitada de enrollment", async () => {
 test("sesión de kiosco exige asistencia y sincronización biométrica", async () => {
   const checks = [];
   const service = createBiometricService({ db: {}, env, clock: () => now, requirePermissions: async (_, permissions) => checks.push(permissions) });
-  await service.session({ body: { kioskId: "TEST-KIOSK", scope: "kiosk" }, headers: { origin: "https://gym.example" } });
+  const response = await service.session({ body: { kioskId: "TEST-KIOSK", scope: "kiosk" }, headers: { origin: "https://gym.example" } });
+  const session = verifyToken(response.data.motorToken, "session", { env }).payload;
+  assert.equal(new Date(session.expiresAtUtc) - new Date(session.issuedAtUtc), 8 * 60 * 60_000);
   assert.deepEqual(checks[0], [["asistencia", "crear"], ["biometria", "sincronizar"]]);
 });
 
