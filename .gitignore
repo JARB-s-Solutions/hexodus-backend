@@ -153,3 +153,4 @@ temp
 
 *.sql
 !prisma/migrations/**/*.sql
+.DS_Store
